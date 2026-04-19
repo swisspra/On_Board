@@ -42,6 +42,21 @@ MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 COMPACT_MODEL = os.environ.get("AGENT_MEM_MODEL", "claude-sonnet-4-20250514")
 
+# Briefing type caps — how many entries of each type to include in briefings.
+# High-signal types get unlimited. Spam-prone types get capped hard.
+BRIEFING_TYPE_CAP = {
+    "handoff": 999,      # always all — critical for continuity
+    "decision": 999,     # always all — architecture decisions matter
+    "warning": 999,      # always all — safety
+    "blocker": 999,      # always all — blockers need visibility
+    "discovery": 10,     # usually valuable
+    "todo": 10,          # actionable
+    "file_change": 8,    # recent file changes
+    "context": 8,        # background info / digests
+    "checkpoint": 1,     # only latest
+    "progress": 5,       # ← SPAM PRONE — cap hard, most recent only
+}
+
 # External info/reference folders — colon-separated paths
 # e.g. "/Users/swiss/docs/specs:/Users/swiss/shared/reference"
 CONTEXT_DIRS = [
@@ -611,35 +626,37 @@ async def memory_get_briefing(params: BriefingInput) -> str:
         except: _add(cp["content"][:300])
         _add("")
 
-    # Blockers
-    bl = [m for m in mem if m["memory_type"]==MemoryType.BLOCKER]
-    if bl:
-        _add("## 🚫 Blockers")
-        for b in bl[-3:]: _add(f"- **{b['title']}** (`{b['agent_name']}`): {b['content'][:150]}")
-        _add("")
+    # ── Type-capped sections (respects BRIEFING_TYPE_CAP) ──
+    type_emoji = {"blocker":"🚫","decision":"🏛️","warning":"⚠️","todo":"📝",
+                  "progress":"✅","file_change":"📁","discovery":"💡","context":"📖"}
+    # Group by type, sorted newest first
+    by_type = {}
+    for m in mem:
+        if m["memory_type"] not in (MemoryType.HANDOFF, MemoryType.CHECKPOINT):
+            by_type.setdefault(m["memory_type"], []).append(m)
 
-    # Decisions — compact
-    dc = [m for m in mem if m["memory_type"]==MemoryType.DECISION]
-    if dc:
-        _add("## 🏛️ Decisions")
-        for d in dc[-8:]:
-            if not _add(f"- **{d['title']}** (`{d['agent_name']}`): {d['content'][:120]}"): break
-        _add("")
+    # Show in priority order: blockers first, then decisions, warnings, etc.
+    type_order = ["blocker","decision","warning","discovery","todo","file_change","progress","context"]
+    for mtype in type_order:
+        entries = by_type.get(mtype, [])
+        if not entries: continue
+        cap = BRIEFING_TYPE_CAP.get(mtype, 5)
+        # Sort newest first, take top N
+        entries_sorted = sorted(entries, key=lambda m: m.get("timestamp",0), reverse=True)
+        capped = entries_sorted[:cap]
+        skipped = len(entries) - len(capped)
 
-    # Warnings — compact
-    wr = [m for m in mem if m["memory_type"]==MemoryType.WARNING]
-    if wr:
-        _add("## ⚠️ Warnings")
-        for w in wr[-5:]:
-            if not _add(f"- **{w['title']}** (`{w['agent_name']}`): {w['content'][:120]}"): break
-        _add("")
+        emoji = type_emoji.get(mtype, "📌")
+        header = f"## {emoji} {mtype.replace('_',' ').title()}"
+        if skipped > 0:
+            header += f" ({len(capped)}/{len(entries)} — {skipped} older entries skipped)"
+        _add(header)
 
-    # TODOs — titles only
-    td = [m for m in mem if m["memory_type"]==MemoryType.TODO]
-    if td:
-        _add("## 📝 TODOs")
-        for t in td[-8:]:
-            if not _add(f"- {t['title']} (`{t['agent_name']}`)"): break
+        for m in capped:
+            # Skip pinned entries (already shown in pinned section)
+            if m.get("pinned"): continue
+            c = m["content"][:120] + ("..." if len(m["content"]) > 120 else "")
+            if not _add(f"- **{m['title']}** (`{m['agent_name']}`): {c}"): break
         _add("")
 
     # State — compact
