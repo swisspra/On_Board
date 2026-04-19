@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────
-# Agent Memory MCP — Project Setup Script
+# On Board — Project Setup Script
 # Run this in your project root to set up hooks for all platforms
 # Usage: bash /path/to/agent-memory-mcp/setup-project.sh
 # ─────────────────────────────────────────────────────────
@@ -10,7 +10,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${1:-$(pwd)}"
 
-echo "🧠 Agent Shared Memory — Project Setup"
+echo "🧠 On Board — Project Setup"
 echo "Project: $PROJECT_DIR"
 echo ""
 
@@ -75,10 +75,10 @@ fi
 
 # ── 5. Create CLAUDE.md / .cursorrules reminder ──
 RULES_NOTE="
-# Agent Shared Memory Protocol
+# On Board — Agent Shared Memory Protocol
 
 This project uses .agent-mem/ for multi-agent coordination.
-When you start working:
+Get On Board before starting ANY work:
 1. Call memory_get_briefing to read full context
 2. Call memory_agent_join with your unique agent_name
 3. Call memory_write after EVERY significant action

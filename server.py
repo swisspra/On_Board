@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Agent Shared Memory MCP Server (agent_memory_mcp)
+On Board — Cross-Platform Agent Shared Memory MCP Server
 
 PROJECT-LOCAL shared memory for multi-agent sequential workflows.
 Memory lives in .agent-mem/ inside the project directory — NOT global.
@@ -65,7 +65,7 @@ CONTEXT_DIRS = [
 ]
 
 # ── MCP Server ──────────────────────────────────────────
-mcp = FastMCP("agent_memory_mcp")
+mcp = FastMCP("onboard_memory_mcp")
 
 # ── Enums ───────────────────────────────────────────────
 class MemoryType(str, Enum):
@@ -142,8 +142,8 @@ def _require_joined(agent_name: str) -> Optional[str]:
         if a.get("agent_name") == agent_name and a.get("status") == AgentStatus.ACTIVE:
             return None
     return (
-        f"⛔ BLOCKED: Agent `{agent_name}` has not joined this project.\n\n"
-        f"You MUST call these tools IN ORDER before doing anything:\n"
+        f"⛔ NOT ON BOARD: Agent `{agent_name}` has not joined this project.\n\n"
+        f"**Get On Board** — follow these steps IN ORDER:\n"
         f"1. `memory_get_briefing()` — read project context\n"
         f"2. `memory_agent_join(agent_name='{agent_name}', agent_platform='...')` — register yourself\n\n"
         f"Only then can you write memories, checkpoints, or handoffs."
@@ -431,7 +431,7 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
                    "agent_role": params.agent_role, "task_focus": params.task_focus, "status": AgentStatus.ACTIVE,
                    "joined_at": _now(), "last_activity": time.time(), "memories_written": 0}
     _save_agt(agents)
-    lines = [f"✅ Active agent: **{params.agent_name}** ({params.agent_platform})", f"ID: `{aid}`", ""]
+    lines = [f"🟢 **On Board**: `{params.agent_name}` ({params.agent_platform})", f"ID: `{aid}`", ""]
     prev = {k:v for k,v in agents.items() if k != aid}
     if prev:
         lines.append("📜 **Previous agents**:")
@@ -579,7 +579,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
         return True
 
     L = []
-    _add(f"# 📋 BRIEFING: {PROJECT_ROOT.name}")
+    _add(f"# 📋 ON BOARD: {PROJECT_ROOT.name}")
     _add(f"**Description**: {prj.get('description')}\n**Tech**: {prj.get('tech_stack','N/A')}\n**Memories**: {len(mem)} hot + {len(digests)} digests\n")
 
     # Agents — always show
@@ -718,7 +718,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
             _add(f"- {pe} `{t['id']}` **{t['title']}** ({t['status']}) {assign} — from `{t['created_by']}`")
         _add("")
 
-    L += ["## 🚨 MANDATORY PROTOCOL — DO NOT SKIP",
+    L += ["## 🚨 GET ON BOARD — MANDATORY PROTOCOL",
           "**STEP 1**: `memory_agent_join(agent_name='your-stable-name', agent_platform='your-platform')` — YOU CANNOT WRITE ANYTHING UNTIL YOU JOIN",
           "**STEP 2**: `memory_write` after EVERY code change, decision, or discovery — NO EXCEPTIONS",
           "**STEP 3**: `memory_checkpoint` every 10-15 min — if you die, this is all the next agent has",
@@ -1574,7 +1574,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
                 f"📤 Submitted `{t['id']}` for review!\n"
                 f"**{t['title']}** by `{params.agent_name}`\n"
                 f"Report: `tickets/review/{t['id']}-submit.md`\n\n"
-                f"🤝 Auto-handoff: you're checked out. Reviewer will pick this up."
+                f"🤝 You're off board. Reviewer will pick this up."
             )
     return f"Ticket `{params.ticket_id}` not found."
 
@@ -1646,7 +1646,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     f"✅ Approved `{t['id']}`: **{t['title']}**\n"
                     f"Moved to `tickets/closed/`\n"
                     f"Reviewed by `{params.agent_name}`\n\n"
-                    f"🤝 Auto-handoff: ticket closed, you're checked out."
+                    f"🤝 Ticket closed. You're off board."
                 )
 
             else:  # reject
@@ -1718,7 +1718,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     f"Rejection note: `tickets/rejected/{t['id']}-rejected.md`\n"
                     f"Ticket reopened for next agent to fix.\n"
                     f"Reviewed by `{params.agent_name}`\n\n"
-                    f"🤝 Auto-handoff: you're checked out. Next agent will see this ticket."
+                    f"🤝 You're off board. Next agent will get back on board and see this ticket."
                 )
     return f"Ticket `{params.ticket_id}` not found."
 

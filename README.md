@@ -1,6 +1,6 @@
-# 🧠 Agent-Cross Platform Shared Memory MCP
+# 🧠 On Board — Cross-Platform Agent Shared Memory MCP
 
-**Project-local** shared memory for multi-agent sequential workflows. When agents die, context survives.
+**One project. One memory. Every platform.** When agents die, context survives.
 
 ## The Problem
 
@@ -208,7 +208,7 @@ Agents that don't support lifecycle hooks won't auto-read memory on startup. You
 Add this to the agent's system prompt or custom instructions:
 
 ```
-You have access to an Agent Shared Memory MCP server for this project.
+You have access to On Board — a shared memory MCP server for this project.
 
 MANDATORY PROTOCOL — follow these steps in order:
 1. Call memory_get_briefing() FIRST — read the full project context before doing anything
@@ -233,10 +233,10 @@ Your agent_name is stamped on every entry — you are accountable for what you w
 Add to `AGENTS.md` in the project root:
 
 ```markdown
-## Agent Shared Memory
+## On Board — Agent Shared Memory
 
 This project uses .agent-mem/ for multi-agent coordination.
-Before starting ANY work:
+Get On Board before starting ANY work:
 1. Call memory_get_briefing to read full context
 2. Call memory_agent_join with your unique agent_name
 3. Call memory_write after EVERY significant action
@@ -415,7 +415,7 @@ Set `ANTHROPIC_API_KEY` for LLM-powered compression, or use rule-based (default)
 ## Folder Structure
 
 ```
-agent-memory-mcp/
+onboard-memory-mcp/
 ├── server.py              ← MCP server (23 tools)
 ├── SKILL.md               ← Universal agent instructions (works on ALL platforms)
 ├── pyproject.toml         ← Package metadata

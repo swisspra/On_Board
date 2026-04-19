@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────
-# Agent Memory MCP — Update to latest version
+# On Board — Update to latest version
 #
 # For repo owner:  bash update.sh           ← git pull + reinstall + deploy
 # For git users:   bash update.sh           ← git pull + reinstall
@@ -12,7 +12,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "🧠 Agent Memory MCP — Update"
+echo "🧠 On Board — Update"
 echo ""
 
 # ── Step 1: Git pull (if this is a git repo) ──

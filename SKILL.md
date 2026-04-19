@@ -1,6 +1,6 @@
-# Agent Shared Memory — SKILL.md
+# On Board — Agent Shared Memory SKILL.md
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Drop this file into any project that uses the Agent Memory MCP.
+# Drop this file into any project that uses On Board MCP.
 # Every AI agent (Claude, Cursor, Codex, Gemini, etc.) will read it
 # automatically via their native instruction file system.
 #
@@ -11,9 +11,9 @@
 #   .cursorrules (append content)           ← Cursor fallback
 #   System prompt (paste content)           ← AntiGravity / any agent
 
-## YOU HAVE ACCESS TO AGENT SHARED MEMORY
+## GET ON BOARD — YOU HAVE ACCESS TO AGENT SHARED MEMORY
 
-This project uses a shared `.agent-mem/` directory for multi-agent coordination.
+This project uses On Board (`.agent-mem/`) for multi-agent coordination.
 You are NOT the first agent. Others have worked here before you.
 Their decisions, discoveries, warnings, and progress are saved in memory.
 
@@ -22,7 +22,7 @@ Their decisions, discoveries, warnings, and progress are saved in memory.
 
 ---
 
-## MANDATORY PROTOCOL — EXECUTE IN ORDER
+## GET ON BOARD — MANDATORY PROTOCOL
 
 ### Step 1: READ (before doing ANYTHING)
 ```
