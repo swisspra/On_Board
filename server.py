@@ -571,7 +571,9 @@ async def memory_get_briefing(params: BriefingInput) -> str:
     _add("## 👥 Agent History")
     for aid,a in agents.items():
         e = {"active":"🟢","kia":"💀","completed":"✅","handed_off":"🤝"}.get(a.get("status",""),"❓")
-        _add(f"- {e} **{a['agent_name']}** ({a['agent_platform']}) — {a['status']} — {a.get('memories_written',0)} writes")
+        role = a.get("agent_role", "main")
+        role_tag = f" [{role}]" if role != "main" else ""
+        _add(f"- {e} **{a['agent_name']}**{role_tag} ({a['agent_platform']}) — {a['status']} — {a.get('memories_written',0)} writes")
     _add("")
 
     # Handoff — highest priority, always include
