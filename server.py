@@ -444,7 +444,7 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
     if ho: lines.append(f"🤝 Last handoff from `{ho[-1]['agent_name']}` — read the briefing!\n")
     # Show pending tickets for this agent
     tickets = _load_ticket_index()
-    my_tickets = [t for t in tickets if t["status"] in (TicketStatus.OPEN, TicketStatus.REJECTED)
+    my_tickets = [t for t in tickets if t["status"] in (TicketStatus.OPEN, TicketStatus.REJECTED, TicketStatus.CLAIMED)
                   and (not t.get("assigned_to")
                        or params.agent_name.lower() in t["assigned_to"].lower()
                        or params.agent_platform.lower() in t["assigned_to"].lower())]
@@ -708,7 +708,12 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 
     # Tickets
     tickets = _load_ticket_index()
-    open_tickets = [t for t in tickets if t["status"] in (TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.IN_REVIEW)]
+    if _auto_transition_claimed(tickets):
+        _save_ticket_index(tickets)
+    open_tickets = [t for t in tickets if t["status"] in (
+        TicketStatus.OPEN, TicketStatus.CLAIMED, TicketStatus.IN_PROGRESS,
+        TicketStatus.CREATING_REPORT, TicketStatus.SUBMITTED, TicketStatus.REVIEWING,
+        TicketStatus.IN_REVIEW)]
     if open_tickets:
         pri_emoji = {"low":"🟢","medium":"🟡","high":"🟠","critical":"🔴"}
         _add(f"## 🎫 Open Tickets ({len(open_tickets)})")
@@ -1365,6 +1370,18 @@ def _load_ticket_index() -> list:
 def _save_ticket_index(tickets: list):
     _save(_ticket_index_p(), {"tickets": tickets})
 
+def _auto_transition_claimed(idx: list) -> bool:
+    """Auto-advance claimed tickets to in_progress after 2 minutes. Returns True if any changed."""
+    changed = False
+    threshold = 120  # 2 minutes
+    for t in idx:
+        if t.get("status") == TicketStatus.CLAIMED and t.get("claimed_at"):
+            if time.time() - t["claimed_at"] >= threshold:
+                t["status"] = TicketStatus.IN_PROGRESS
+                t["updated_at"] = _now()
+                changed = True
+    return changed
+
 def _write_ticket_md(filepath: Path, data: dict):
     """Write a ticket as a human-readable .md file."""
     lines = [f"# {data.get('title', 'Untitled')}"]
@@ -1388,8 +1405,12 @@ class TicketPriority(str, Enum):
     LOW = "low"; MEDIUM = "medium"; HIGH = "high"; CRITICAL = "critical"
 
 class TicketStatus(str, Enum):
-    OPEN = "open"; IN_PROGRESS = "in_progress"
-    IN_REVIEW = "in_review"; CLOSED = "closed"; REJECTED = "rejected"
+    OPEN = "open"; CLAIMED = "claimed"; IN_PROGRESS = "in_progress"
+    CREATING_REPORT = "creating_report"; SUBMITTED = "submitted"
+    REVIEWING = "reviewing"; CLOSED = "closed"; REJECTED = "rejected"
+    CANCELED = "canceled"; TERMINATED = "terminated"
+    # legacy alias kept for backward compat
+    IN_REVIEW = "in_review"
 
 class CreateTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -1481,22 +1502,31 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
 
 @mcp.tool(name="memory_claim_ticket", annotations={"title":"Claim Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_claim_ticket(params: ClaimTicketInput) -> str:
-    """Claim an open ticket. Changes status to in_progress."""
+    """Claim an open ticket (sets to claimed). Call again on a claimed ticket to advance to in_progress (e.g. when spawning a subagent)."""
     idx = _load_ticket_index()
     for t in idx:
         if t["id"] == params.ticket_id:
+            if t["status"] == TicketStatus.CLAIMED and t.get("claimed_by") == params.agent_name:
+                t["status"] = TicketStatus.IN_PROGRESS
+                t["updated_at"] = _now()
+                _save_ticket_index(idx)
+                _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
+                return (
+                    f"🔧 `{t['id']}` → **in_progress** by `{params.agent_name}`\n"
+                    f"Subagent running. Use `memory_submit_ticket` when done."
+                )
             if t["status"] not in (TicketStatus.OPEN,):
                 return f"Ticket `{t['id']}` is already {t['status']}."
-            t["status"] = TicketStatus.IN_PROGRESS
+            t["status"] = TicketStatus.CLAIMED
             t["claimed_by"] = params.agent_name
+            t["claimed_at"] = time.time()
             t["updated_at"] = _now()
             _save_ticket_index(idx)
-            # Update .md file
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return (
-                f"🔧 Claimed `{t['id']}`: **{t['title']}**\n"
-                f"Now in progress by `{params.agent_name}`\n"
-                f"When done, use `memory_submit_ticket` to submit for review."
+                f"📌 Claimed `{t['id']}`: **{t['title']}**\n"
+                f"Status: claimed by `{params.agent_name}` (auto-advances to in_progress in 2 min)\n"
+                f"Call again to advance immediately, or use `memory_submit_ticket` when done."
             )
     return f"Ticket `{params.ticket_id}` not found."
 
@@ -1511,9 +1541,9 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     idx = _load_ticket_index()
     for t in idx:
         if t["id"] == params.ticket_id:
-            if t["status"] not in (TicketStatus.IN_PROGRESS, TicketStatus.REJECTED):
-                return f"Ticket `{t['id']}` is {t['status']} — can only submit in_progress or rejected tickets."
-            t["status"] = TicketStatus.IN_REVIEW
+            if t["status"] not in (TicketStatus.CLAIMED, TicketStatus.IN_PROGRESS, TicketStatus.CREATING_REPORT, TicketStatus.REJECTED, TicketStatus.IN_REVIEW):
+                return f"Ticket `{t['id']}` is {t['status']} — can only submit claimed/in_progress/creating_report tickets."
+            t["status"] = TicketStatus.SUBMITTED
             t["updated_at"] = _now()
             _save_ticket_index(idx)
 
@@ -1590,8 +1620,11 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     idx = _load_ticket_index()
     for t in idx:
         if t["id"] == params.ticket_id:
-            if t["status"] != TicketStatus.IN_REVIEW:
-                return f"Ticket `{t['id']}` is {t['status']} — can only review tickets in_review."
+            if t["status"] not in (TicketStatus.SUBMITTED, TicketStatus.IN_REVIEW):
+                return f"Ticket `{t['id']}` is {t['status']} — can only review submitted tickets."
+            t["status"] = TicketStatus.REVIEWING
+            t["updated_at"] = _now()
+            _save_ticket_index(idx)
 
             ticket_file = tdir / f"{t['id']}.md"
             submit_file = tdir / "review" / f"{t['id']}-submit.md"
@@ -1723,10 +1756,52 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     return f"Ticket `{params.ticket_id}` not found."
 
 
+@mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
+    """Cancel a ticket. Only the original creator can cancel."""
+    idx = _load_ticket_index()
+    for t in idx:
+        if t["id"] == ticket_id:
+            if t["created_by"] != agent_name:
+                return f"❌ Only the creator (`{t['created_by']}`) can cancel ticket `{ticket_id}`."
+            if t["status"] in (TicketStatus.CLOSED, TicketStatus.CANCELED, TicketStatus.TERMINATED):
+                return f"Ticket `{ticket_id}` is already {t['status']}."
+            t["status"] = TicketStatus.CANCELED
+            t["updated_at"] = _now()
+            if reason:
+                t["cancel_reason"] = reason
+            _save_ticket_index(idx)
+            _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
+            return f"🚫 Ticket `{ticket_id}` canceled by creator `{agent_name}`." + (f"\nReason: {reason}" if reason else "")
+    return f"Ticket `{ticket_id}` not found."
+
+
+@mcp.tool(name="memory_terminate_ticket", annotations={"title":"Terminate Ticket","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":False})
+async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
+    """Forcefully terminate a ticket at any stage. Only the original creator can terminate."""
+    idx = _load_ticket_index()
+    for t in idx:
+        if t["id"] == ticket_id:
+            if t["created_by"] != agent_name:
+                return f"❌ Only the creator (`{t['created_by']}`) can terminate ticket `{ticket_id}`."
+            if t["status"] in (TicketStatus.CLOSED, TicketStatus.CANCELED, TicketStatus.TERMINATED):
+                return f"Ticket `{ticket_id}` is already {t['status']}."
+            t["status"] = TicketStatus.TERMINATED
+            t["updated_at"] = _now()
+            if reason:
+                t["terminate_reason"] = reason
+            _save_ticket_index(idx)
+            _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
+            return f"⛔ Ticket `{ticket_id}` terminated by creator `{agent_name}`." + (f"\nReason: {reason}" if reason else "")
+    return f"Ticket `{ticket_id}` not found."
+
+
 @mcp.tool(name="memory_list_tickets", annotations={"title":"List Tickets","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_list_tickets(params: ListTicketsInput) -> str:
     """List tickets. Shows open/in_progress/in_review by default. Use include_closed for history."""
     idx = _load_ticket_index()
+    if _auto_transition_claimed(idx):
+        _save_ticket_index(idx)
     if not idx:
         return "No tickets yet. Use `memory_create_ticket` to create one."
 
@@ -1734,7 +1809,7 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
     if params.status:
         filtered = [t for t in filtered if t["status"] == params.status]
     elif not params.include_closed:
-        filtered = [t for t in filtered if t["status"] not in (TicketStatus.CLOSED,)]
+        filtered = [t for t in filtered if t["status"] not in (TicketStatus.CLOSED, TicketStatus.CANCELED, TicketStatus.TERMINATED)]
     if params.assigned_to:
         filtered = [t for t in filtered if
                     params.assigned_to.lower() in (t.get("assigned_to") or "").lower() or
@@ -1744,7 +1819,11 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
         return "No tickets matching filters."
 
     pe = {"low":"🟢","medium":"🟡","high":"🟠","critical":"🔴"}
-    se = {"open":"📭","in_progress":"🔧","in_review":"📤","closed":"✅","rejected":"❌"}
+    se = {
+        "open":"📭","claimed":"📌","in_progress":"🔧","creating_report":"📝",
+        "submitted":"📤","reviewing":"🔍","in_review":"📤",
+        "closed":"✅","rejected":"❌","canceled":"🚫","terminated":"⛔"
+    }
 
     lines = [f"# 🎫 Tickets ({len(filtered)})\n"]
     for t in sorted(filtered, key=lambda x: ({"critical":0,"high":1,"medium":2,"low":3}.get(x["priority"],9), -x.get("timestamp",0))):
@@ -1759,6 +1838,19 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
     # Show folder structure hint
     lines.append("📁 `tickets/` = open queue | `tickets/review/` = submitted | `tickets/closed/` = done | `tickets/rejected/` = failed")
     return "\n".join(lines)
+
+
+@mcp.prompt(name="on-board", description="Join the project and get the full briefing — always run this first.")
+def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-desktop") -> str:
+    return (
+        f"You are joining a shared multi-agent project. Follow these steps in order:\n\n"
+        f"1. Call `memory_agent_join` with:\n"
+        f"   - agent_name: \"{agent_name}\"\n"
+        f"   - agent_platform: \"{agent_platform}\"\n\n"
+        f"2. Call `memory_get_briefing` to read the full project context.\n\n"
+        f"3. Report back: who is active, what tickets are open, and what was the last decision or handoff.\n\n"
+        f"Do not start any work until you have completed both steps above."
+    )
 
 
 if __name__ == "__main__":
