@@ -2,3 +2,17 @@ __pycache__/
 *.pyc
 venv/
 .DS_Store
+
+# Agent shared memory (runtime data)
+.agent-mem/
+
+# IDE and tool config (local only)
+.agent/
+.agent-mem-hooks/
+.claude/
+.codex/
+.cursor/
+
+# Project instructions (local only)
+CLAUDE.md
+AGENTS.md

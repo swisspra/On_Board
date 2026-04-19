@@ -88,6 +88,12 @@ if [ -f "$GITIGNORE" ]; then
         echo ".agent-mem/" >> "$GITIGNORE"
         echo "✅ Added .agent-mem/ to .gitignore"
     fi
+    for ENTRY in ".agent/" ".agent-mem-hooks/" ".claude/" ".codex/" ".cursor/" "AGENTS.md" "CLAUDE.md"; do
+        if ! grep -qF "$ENTRY" "$GITIGNORE"; then
+            echo "$ENTRY" >> "$GITIGNORE"
+            echo "✅ Added $ENTRY to .gitignore"
+        fi
+    done
 else
     echo ".agent-mem/" > "$GITIGNORE"
     echo "✅ Created .gitignore with .agent-mem/"

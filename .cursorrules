@@ -1,0 +1,20 @@
+
+# On Board — Agent Shared Memory Protocol
+
+This project uses .agent-mem/ for multi-agent coordination.
+Get On Board before starting ANY work:
+1. Call memory_get_briefing to read full context
+2. Call memory_agent_join with your unique agent_name
+3. Call memory_write after EVERY significant action
+4. Call memory_checkpoint every 10-15 minutes
+5. Call memory_handoff before you finish
+
+When coordinating work between agents:
+- Use memory_create_ticket to request help and assign it to a specific agent or platform when needed
+- Use memory_claim_ticket to pick up work that was assigned to you
+- Use memory_submit_ticket when your implementation is ready for review
+- Use memory_review_ticket to approve work or send it back with concrete fix instructions
+
+If you skip these steps, the next agent will have no context and will redo your work.
+Your agent_name is stamped on every entry, so write updates another agent can rely on.
+
