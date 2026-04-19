@@ -14,7 +14,7 @@ echo "🧠 On Board — Project Setup"
 echo "Project: $PROJECT_DIR"
 echo ""
 
-# ── 1. Create .agent-mem-hooks/ in project ──
+# ── 1. Create hook directories in project ──
 HOOKS_DIR="$PROJECT_DIR/.agent-mem-hooks"
 mkdir -p "$HOOKS_DIR"
 
@@ -26,6 +26,17 @@ cp "$SCRIPT_DIR/hooks/claude-code-stop.sh" "$HOOKS_DIR/"
 chmod +x "$HOOKS_DIR"/*.sh
 
 echo "✅ Hooks copied to .agent-mem-hooks/"
+
+CODEX_DIR="$PROJECT_DIR/.codex"
+CODEX_HOOKS_DIR="$CODEX_DIR/hooks"
+mkdir -p "$CODEX_HOOKS_DIR"
+
+cp "$SCRIPT_DIR/hooks/codex-session-start.sh" "$CODEX_HOOKS_DIR/"
+cp "$SCRIPT_DIR/hooks/codex-stop.sh" "$CODEX_HOOKS_DIR/"
+
+chmod +x "$CODEX_HOOKS_DIR"/*.sh
+
+echo "✅ Codex hooks copied to .codex/hooks/"
 
 # ── 1b. Copy SKILL.md to Claude Code skills ──
 SKILL_DIR="$PROJECT_DIR/.claude/skills/agent-memory"
@@ -59,6 +70,15 @@ else
     echo "✅ Claude Code hooks configured at .claude/settings.json"
 fi
 
+# ── 3b. Set up Codex hooks ──
+if [ -f "$CODEX_DIR/hooks.json" ]; then
+    echo "⚠️  .codex/hooks.json exists — please merge hooks manually:"
+    echo "    See: $SCRIPT_DIR/configs/codex-hooks.json"
+else
+    cp "$SCRIPT_DIR/configs/codex-hooks.json" "$CODEX_DIR/hooks.json"
+    echo "✅ Codex hooks configured at .codex/hooks.json"
+fi
+
 # ── 4. Update .gitignore ──
 GITIGNORE="$PROJECT_DIR/.gitignore"
 if [ -f "$GITIGNORE" ]; then
@@ -73,7 +93,7 @@ else
     echo "✅ Created .gitignore with .agent-mem/"
 fi
 
-# ── 5. Create CLAUDE.md / .cursorrules reminder ──
+# ── 5. Create CLAUDE.md / .cursorrules / AGENTS.md reminder ──
 RULES_NOTE="
 # On Board — Agent Shared Memory Protocol
 
@@ -84,6 +104,15 @@ Get On Board before starting ANY work:
 3. Call memory_write after EVERY significant action
 4. Call memory_checkpoint every 10-15 minutes
 5. Call memory_handoff before you finish
+
+When coordinating work between agents:
+- Use memory_create_ticket to request help and assign it to a specific agent or platform when needed
+- Use memory_claim_ticket to pick up work that was assigned to you
+- Use memory_submit_ticket when your implementation is ready for review
+- Use memory_review_ticket to approve work or send it back with concrete fix instructions
+
+If you skip these steps, the next agent will have no context and will redo your work.
+Your agent_name is stamped on every entry, so write updates another agent can rely on.
 "
 
 if [ ! -f "$PROJECT_DIR/CLAUDE.md" ]; then
@@ -96,6 +125,24 @@ if [ ! -f "$PROJECT_DIR/.cursorrules" ]; then
     echo "✅ Created .cursorrules with agent memory protocol"
 fi
 
+if [ -f "$PROJECT_DIR/AGENTS.md" ]; then
+    echo "⚠️  AGENTS.md exists — please merge Codex instructions manually"
+else
+    echo "$RULES_NOTE" > "$PROJECT_DIR/AGENTS.md"
+    echo "✅ Created AGENTS.md with agent memory protocol"
+fi
+
+ANTIGRAVITY_RULES_DIR="$PROJECT_DIR/.agent/rules"
+ANTIGRAVITY_RULE_FILE="$ANTIGRAVITY_RULES_DIR/on-board-agent-memory.md"
+mkdir -p "$ANTIGRAVITY_RULES_DIR"
+
+if [ -f "$ANTIGRAVITY_RULE_FILE" ]; then
+    echo "⚠️  .agent/rules/on-board-agent-memory.md exists — please merge AntiGravity rules manually"
+else
+    echo "$RULES_NOTE" > "$ANTIGRAVITY_RULE_FILE"
+    echo "✅ Created .agent/rules/on-board-agent-memory.md for AntiGravity"
+fi
+
 echo ""
 echo "🎉 Setup complete!"
 echo ""
@@ -106,13 +153,22 @@ echo "  │   ├── cursor-session-start.sh"
 echo "  │   ├── cursor-session-end.sh"
 echo "  │   ├── claude-code-session-start.sh"
 echo "  │   └── claude-code-stop.sh"
+echo "  ├── .codex/hooks.json       ← Codex hook config"
+echo "  ├── .codex/hooks/           ← Codex hook scripts"
+echo "  │   ├── codex-session-start.sh"
+echo "  │   └── codex-stop.sh"
 echo "  ├── .cursor/hooks.json      ← Cursor hook config"
 echo "  ├── .claude/settings.json   ← Claude Code hook config"
 echo "  ├── .cursorrules            ← Rules for Cursor agents"
 echo "  ├── CLAUDE.md               ← Rules for Claude Code agents"
+echo "  ├── AGENTS.md               ← Rules for Codex agents"
+echo "  ├── .agent/rules/           ← Rules for AntiGravity"
+echo "  │   └── on-board-agent-memory.md"
 echo "  └── .agent-mem/             ← Runtime memory (gitignored)"
 echo ""
 echo "Next: Add the MCP server to each agent platform:"
 echo "  Cursor:     .cursor/mcp.json"
 echo "  Claude Code: claude mcp add agent-memory -- python /path/to/server.py"
+echo "  Codex:      enable codex_hooks in ~/.codex/config.toml and add agent-memory MCP"
+echo "  AntiGravity: add agent-memory MCP and keep .agent/rules/on-board-agent-memory.md in the workspace"
 echo ""
