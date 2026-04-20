@@ -26,13 +26,10 @@ your-project/
 
 ## What's New in v3.0.0
 
-**Multi-agent concurrency.** Agents from different platforms now coexist — Claude, Cursor, Codex, and AntiGravity can all be active simultaneously on the same project.
-
-- **Platform-scoped KIA** — joining only replaces agents on the *same* platform
-- **Heartbeat tracking** — every tool call updates `last_activity`
-- **Idle auto-KIA** — agents idle >30min are automatically marked KIA
-- **Dashboard grouping** — agents grouped by name with platform colors
-- **Orphan ticket detection** — tickets whose claimer went offline get flagged
+- **Smarter KIA detection** — agents are now tracked with heartbeats and auto-marked KIA after 30min idle
+- **Better agent status** — more accurate active/offline tracking
+- **Dashboard improvements** — agents grouped by name, platform colors, orphan ticket warnings
+- **Naming convention** — agents get a naming tip on join for better traceability
 
 See [CHANGELOG.md](CHANGELOG.md) for details.
 
@@ -203,7 +200,6 @@ Pulls latest, reinstalls deps, auto-deploys to detected copies. Restart your age
 
 - **MANDATORY RULE**: Auto-save memory after EVERY code change
 - If applying to an existing project, tell your first agent to read the codebase, then compact for others
-- Multi-agent: each platform gets one active agent. For parallel same-platform agents, use different `agent_platform` labels
 
 ## License
 
