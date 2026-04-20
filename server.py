@@ -42,6 +42,11 @@ MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 COMPACT_MODEL = os.environ.get("AGENT_MEM_MODEL", "claude-sonnet-4-20250514")
 
+# ── Multi-Agent Concurrency Config ──────────────────────
+# Idle detection: agents with no heartbeat for this long get auto-KIA'd
+IDLE_KIA_MIN = int(os.environ.get("AGENT_MEM_IDLE_KIA_MIN", "30"))
+IDLE_WARN_MIN = IDLE_KIA_MIN // 2  # warn at half the KIA threshold
+
 # Briefing type caps — how many entries of each type to include in briefings.
 # High-signal types get unlimited. Spam-prone types get capped hard.
 BRIEFING_TYPE_CAP = {
@@ -127,12 +132,56 @@ def _save_sta(s): _save(_sta_p(), s)
 def _load_prj(): return _load(_prj_p())
 def _save_prj(p): _save(_prj_p(), p)
 
-def _mark_prev_kia(exclude=None):
+def _mark_prev_kia(exclude=None, platform=None, agent_name=None):
+    """Platform-scoped KIA: only kills agents on the SAME platform.
+    Agents from different platforms (claude, cursor, antigravity) coexist."""
     agents = _load_agt(); changed = False
     for aid, info in agents.items():
-        if aid != exclude and info.get("status") == AgentStatus.ACTIVE:
+        if aid == exclude or info.get("status") != AgentStatus.ACTIVE:
+            continue
+        # Same name + same platform → rejoin (agent crashed/restarted)
+        if agent_name and info.get("agent_name") == agent_name and info.get("agent_platform") == platform:
             info["status"] = AgentStatus.KIA
-            info["kia_at"] = _now(); info["kia_reason"] = "new_agent_joined"; changed = True
+            info["kia_at"] = _now()
+            info["kia_reason"] = "rejoin_same_identity"
+            changed = True
+        # Same platform, different name → replaced (sequential per platform)
+        elif platform and info.get("agent_platform") == platform:
+            info["status"] = AgentStatus.KIA
+            info["kia_at"] = _now()
+            info["kia_reason"] = "replaced_same_platform"
+            changed = True
+        # Different platform → LEAVE ALONE (multi-agent concurrency)
+    if changed: _save_agt(agents)
+
+def _touch_heartbeat(agent_name: str):
+    """Update last_activity for all active records of this agent."""
+    agents = _load_agt(); changed = False
+    for a in agents.values():
+        if a.get("agent_name") == agent_name and a.get("status") == AgentStatus.ACTIVE:
+            a["last_activity"] = time.time()
+            changed = True
+    if changed: _save_agt(agents)
+
+_last_sweep_ts = 0
+_SWEEP_MIN_INTERVAL = 30  # debounce: max once per 30s
+
+def _lazy_kia_sweep():
+    """Auto-KIA agents idle longer than IDLE_KIA_MIN. Debounced."""
+    global _last_sweep_ts
+    if time.time() - _last_sweep_ts < _SWEEP_MIN_INTERVAL:
+        return
+    _last_sweep_ts = time.time()
+    agents = _load_agt(); changed = False; now = time.time()
+    for a in agents.values():
+        if a.get("status") != AgentStatus.ACTIVE:
+            continue
+        idle_sec = now - a.get("last_activity", 0)
+        if idle_sec > IDLE_KIA_MIN * 60:
+            a["status"] = AgentStatus.KIA
+            a["kia_at"] = _now()
+            a["kia_reason"] = f"idle_{int(idle_sec // 60)}min"
+            changed = True
     if changed: _save_agt(agents)
 
 def _require_joined(agent_name: str) -> Optional[str]:
@@ -420,11 +469,12 @@ async def memory_init(params: ProjectInitInput) -> str:
 
 @mcp.tool(name="memory_agent_join", annotations={"title":"Register as Active Agent","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
 async def memory_agent_join(params: AgentJoinInput) -> str:
-    """Register as the active agent. Marks any previous active agent as KIA (sequential model).
+    """Register as the active agent. KIAs only agents on the SAME platform (multi-agent concurrency).
     Your agent_name is stamped on EVERY write for traceability."""
     prj = _load_prj()
     if not prj: return "Error: Not initialized. Call `memory_init` first."
-    _mark_prev_kia()
+    _lazy_kia_sweep()  # clean up idle agents before joining
+    _mark_prev_kia(platform=params.agent_platform, agent_name=params.agent_name)
     aid = f"{params.agent_platform}-{_id()}"
     agents = _load_agt()
     agents[aid] = {"agent_name": params.agent_name, "agent_platform": params.agent_platform,
@@ -432,10 +482,24 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
                    "joined_at": _now(), "last_activity": time.time(), "memories_written": 0}
     _save_agt(agents)
     lines = [f"🟢 **On Board**: `{params.agent_name}` ({params.agent_platform})", f"ID: `{aid}`", ""]
-    prev = {k:v for k,v in agents.items() if k != aid}
+    # Naming warning
+    if params.agent_name == params.agent_platform or len(params.agent_name) < 5 or params.agent_name[0].isupper():
+        lines.append("⚠️ **Naming tip**: Use format `platform-model-dateNsuffix` e.g. `claude-opus4.7-21apr26a` (lowercase, descriptive)\n")
+    # Show currently active agents on OTHER platforms
+    active_others = {k:v for k,v in agents.items() if k != aid and v.get("status") == AgentStatus.ACTIVE}
+    if active_others:
+        lines.append("🌐 **Co-active agents** (other platforms):")
+        for k,v in active_others.items():
+            lines.append(f"  🟢 `{v['agent_name']}` ({v['agent_platform']})")
+        lines.append("")
+    # Show recent agents (last 5 non-active, for context)
+    prev = sorted(
+        [(k,v) for k,v in agents.items() if k != aid and v.get("status") != AgentStatus.ACTIVE],
+        key=lambda x: x[1].get("last_activity", 0), reverse=True
+    )[:5]
     if prev:
-        lines.append("📜 **Previous agents**:")
-        for k,v in prev.items():
+        lines.append("📜 **Recent agents**:")
+        for k,v in prev:
             e = {"active":"🟢","kia":"💀","completed":"✅","handed_off":"🤝"}.get(v.get("status",""),"❓")
             lines.append(f"  {e} `{v['agent_name']}` ({v['agent_platform']}) — {v['status']}")
         lines.append("")
@@ -466,6 +530,7 @@ async def memory_write(params: MemoryWriteInput) -> str:
     """Write a memory entry stamped with your agent_name. Write frequently — if you die, this is all the next agent has."""
     err = _require_joined(params.agent_name)
     if err: return err
+    _touch_heartbeat(params.agent_name)
     mem = _load_mem()
     entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": params.memory_type,
              "title": params.title, "content": params.content, "tags": params.tags or [],
@@ -520,6 +585,7 @@ async def memory_checkpoint(params: CheckpointInput) -> str:
     """Full state checkpoint. Do every 10-15 min or before risky ops. Saves both as memory entry AND standalone file."""
     err = _require_joined(params.agent_name)
     if err: return err
+    _touch_heartbeat(params.agent_name)
     cpd = {"summary": params.summary, "remaining_tasks": params.remaining_tasks or [],
            "active_branch": params.active_branch, "blockers": params.blockers or [], "state": _load_sta()}
     mem = _load_mem()
@@ -538,6 +604,7 @@ async def memory_handoff(params: HandoffInput) -> str:
     """Formal handoff. ALWAYS call before leaving. Next agent sees this first."""
     err = _require_joined(params.agent_name)
     if err: return err
+    _touch_heartbeat(params.agent_name)
     content = f"## Summary\n{params.summary}\n\n## Next Steps\n" + "\n".join(f"{i+1}. {s}" for i,s in enumerate(params.next_steps)) + "\n"
     if params.warnings: content += "\n## ⚠️ Warnings\n" + "\n".join(f"- {w}" for w in params.warnings) + "\n"
     if params.files_modified: content += "\n## Modified\n" + "\n".join(f"- `{f}`" for f in params.files_modified) + "\n"
@@ -564,6 +631,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
     Default 4000 tokens — set lower for cheaper, higher for more detail."""
     prj = _load_prj()
     if not prj: return "No .agent-mem/ found. Run `memory_init`."
+    _lazy_kia_sweep()  # clean up idle agents before briefing
     mem = _load_mem(); agents = _load_agt(); state = _load_sta()
     digests = _load_digests()
     budget = params.token_budget or 4000
@@ -589,6 +657,11 @@ async def memory_get_briefing(params: BriefingInput) -> str:
         role = a.get("agent_role", "main")
         role_tag = f" [{role}]" if role != "main" else ""
         _add(f"- {e} **{a['agent_name']}**{role_tag} ({a['agent_platform']}) — {a['status']} — {a.get('memories_written',0)} writes")
+        # Idle warning for active agents
+        if a.get("status") == AgentStatus.ACTIVE:
+            idle_sec = time.time() - a.get("last_activity", 0)
+            if idle_sec > IDLE_WARN_MIN * 60:
+                _add(f"  ⚠️ idle {int(idle_sec // 60)}min — may auto-KIA at {IDLE_KIA_MIN}min")
     _add("")
 
     # Handoff — highest priority, always include
@@ -735,6 +808,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 @mcp.tool(name="memory_status", annotations={"title":"Status","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_status() -> str:
     """Quick status dashboard."""
+    _lazy_kia_sweep()
     mem = _load_mem(); agents = _load_agt()
     tc = {}
     for m in mem: tc[m.get("memory_type","?")] = tc.get(m.get("memory_type","?"),0)+1
@@ -761,6 +835,8 @@ async def memory_pin(params: PinInput) -> str:
 @mcp.tool(name="memory_update_state", annotations={"title":"Update State","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_update_state(params: UpdateStateInput) -> str:
     """Update shared key-value state. Stamped with agent_name."""
+    if params.agent_name:
+        _touch_heartbeat(params.agent_name)
     s = _load_sta()
     s[params.key] = {"value": params.value, "updated_at": _now(), "updated_by": params.agent_name or "unknown"}
     _save_sta(s)
@@ -1464,6 +1540,7 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
     """
     err = _require_joined(params.agent_name)
     if err: return err
+    _touch_heartbeat(params.agent_name)
     _tickets_dir()
     ticket_id = f"TK-{_id()}"
     ticket_data = {
@@ -1504,6 +1581,7 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
 async def memory_claim_ticket(params: ClaimTicketInput) -> str:
     """Claim an open ticket (sets to claimed). Call again on a claimed ticket to advance to in_progress (e.g. when spawning a subagent)."""
     idx = _load_ticket_index()
+    _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
             if t["status"] == TicketStatus.CLAIMED and t.get("claimed_by") == params.agent_name:
@@ -1539,6 +1617,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     Another agent (reviewer/PM) will approve or reject.
     """
     idx = _load_ticket_index()
+    _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
             if t["status"] not in (TicketStatus.CLAIMED, TicketStatus.IN_PROGRESS, TicketStatus.CREATING_REPORT, TicketStatus.REJECTED, TicketStatus.IN_REVIEW):
@@ -1618,6 +1697,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     """
     tdir = _tickets_dir()
     idx = _load_ticket_index()
+    _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
             if t["status"] not in (TicketStatus.SUBMITTED, TicketStatus.IN_REVIEW):
@@ -1800,6 +1880,7 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
 async def memory_list_tickets(params: ListTicketsInput) -> str:
     """List tickets. Shows open/in_progress/in_review by default. Use include_closed for history."""
     idx = _load_ticket_index()
+    _lazy_kia_sweep()
     if _auto_transition_claimed(idx):
         _save_ticket_index(idx)
     if not idx:

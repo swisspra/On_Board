@@ -44,7 +44,7 @@ def get_flag_value(name, default):
     return default
 
 PORT = get_flag_value("--port", 8765)
-POLL_MS = get_flag_value("--interval", 3000)
+POLL_MS = get_flag_value("--interval", get_flag_value("--poll-sec", 5) * 1000 if "--poll-sec" in flags else 5000)
 
 PROJECT_ROOT = Path(positional[0] if positional else os.environ.get("AGENT_PROJECT_DIR", os.getcwd()))
 MEMORY_DIR = PROJECT_ROOT / ".agent-mem"
@@ -257,6 +257,11 @@ const TYPE_COLORS = {
 
 const STATUS_EMOJI = { active:'🟢', kia:'💀', completed:'✅', handed_off:'🤝' };
 const STATUS_COLOR = { active:'#22c55e', kia:'#ef4444', completed:'#22c55e', handed_off:'#a855f7' };
+const PLATFORM_COLORS = {
+  claude:'var(--info)', cursor:'var(--violet)', codex:'var(--accent)',
+  antigravity:'var(--live)', unknown:'var(--dim)',
+  'codex-desktop':'var(--accent)', 'claude-code':'var(--info)',
+};
 
 let lastSeenIds = new Set();
 let lastCounts  = { memories:-1, agents:-1, tickets:-1 };
@@ -353,13 +358,41 @@ function renderAgents(containerId, agents, compact) {
     container.innerHTML = '<div class="empty">No agents registered yet.</div>';
     return;
   }
-  container.innerHTML = list.map(a => {
+  // Group by agent_name
+  const groups = {};
+  for (const a of list) {
+    const name = a.agent_name || '?';
+    if (!groups[name]) groups[name] = { latest: a, records: [], totalWrites: 0 };
+    groups[name].records.push(a);
+    groups[name].totalWrites += (a.memories_written || 0);
+    if ((a.last_activity || 0) > (groups[name].latest.last_activity || 0)) groups[name].latest = a;
+  }
+  // Sort: active first, then by most recent activity
+  const sorted = Object.values(groups).sort((a, b) => {
+    const aActive = a.latest.status === 'active' ? 0 : 1;
+    const bActive = b.latest.status === 'active' ? 0 : 1;
+    if (aActive !== bActive) return aActive - bActive;
+    return (b.latest.last_activity || 0) - (a.latest.last_activity || 0);
+  });
+  // In compact mode: only active + recent (last 3h)
+  const now = Date.now() / 1000;
+  const filtered = compact
+    ? sorted.filter(g => g.latest.status === 'active' || (now - (g.latest.last_activity || 0)) < 10800)
+    : sorted;
+  container.innerHTML = filtered.map(g => {
+    const a = g.latest;
     const dot = STATUS_COLOR[a.status] || '#666';
     const emoji = STATUS_EMOJI[a.status] || '❓';
+    const platBase = (a.agent_platform || '').split('-')[0].toLowerCase();
+    const platColor = PLATFORM_COLORS[platBase] || PLATFORM_COLORS[a.agent_platform] || 'var(--dim)';
+    const sessions = g.records.length > 1 ? ' · ' + g.records.length + ' sessions' : '';
     const role = (a.agent_role && a.agent_role !== 'main') ? ' [' + esc(a.agent_role) + ']' : '';
+    const idleWarn = a.status === 'active' && a.last_activity && (now - a.last_activity) > 900
+      ? ' · ⚠️ idle ' + Math.floor((now - a.last_activity) / 60) + 'm'
+      : '';
     const meta = compact
-      ? esc(a.agent_platform || '?') + ' · ' + (a.memories_written || 0) + 'w · ' + esc(a.status || '?')
-      : emoji + ' ' + esc(a.agent_platform || '?') + ' · ' + (a.memories_written || 0) + ' writes · joined ' + esc((a.joined_at || '').slice(0,16));
+      ? '<span style="color:' + platColor + '">' + esc(a.agent_platform || '?') + '</span> · ' + g.totalWrites + 'w · ' + esc(a.status || '?') + sessions + idleWarn
+      : emoji + ' <span style="color:' + platColor + '">' + esc(a.agent_platform || '?') + '</span> · ' + g.totalWrites + ' writes · joined ' + esc((a.joined_at || '').slice(0,16)) + sessions + idleWarn;
     return '<div class="agent-row">' +
       '<div class="agent-dot" style="background:' + dot + '"></div>' +
       '<div class="agent-name">' + esc(a.agent_name || '?') + role + '</div>' +
@@ -368,12 +401,14 @@ function renderAgents(containerId, agents, compact) {
   }).join('');
 }
 
-function renderTickets(tickets) {
+function renderTickets(tickets, agents) {
   const container = document.getElementById('ticketsList');
   if (!tickets.length) {
     container.innerHTML = '<div class="empty">No tickets yet.</div>';
     return;
   }
+  // Orphan detection
+  const activeNames = new Set(Object.values(agents || {}).filter(a => a.status === 'active').map(a => a.agent_name));
   const priOrder = { critical:0, high:1, medium:2, low:3 };
   const sorted = tickets.slice().sort((a, b) => {
     const pa = priOrder[a.priority] == null ? 9 : priOrder[a.priority];
@@ -383,10 +418,12 @@ function renderTickets(tickets) {
   });
   container.innerHTML = sorted.map(t => {
     const claimed = t.claimed_by ? '⚡ ' + esc(t.claimed_by) : '';
-    return '<div class="ticket-item">' +
+    const isOrphan = t.claimed_by && ['claimed','in_progress'].includes(t.status) && !activeNames.has(t.claimed_by);
+    const orphanBadge = isOrphan ? ' <span style="color:var(--warn)">⚠️ orphan — claimer offline</span>' : '';
+    return '<div class="ticket-item"' + (isOrphan ? ' style="border-left:2px solid var(--warn)"' : '') + '>' +
       '<span class="ticket-id">' + esc(t.id || '') + '</span>' +
       '<span class="pri-' + esc(t.priority || 'medium') + '"> ● ' + esc(t.priority || '') + '</span>' +
-      '<span class="st-' + esc(t.status || 'open') + '"> · ' + esc(t.status || '') + '</span>' +
+      '<span class="st-' + esc(t.status || 'open') + '"> · ' + esc(t.status || '') + '</span>' + orphanBadge +
       '<div class="ticket-title">' + esc(t.title || '') + '</div>' +
       '<div class="ticket-meta">by ' + esc(t.created_by || '?') + ' → ' + esc(t.assigned_to || 'any') + ' ' + claimed + '</div>' +
     '</div>';
@@ -593,7 +630,7 @@ async function refresh() {
   renderAgents('agentRoster', agents, true);
   renderMemories('timeline', memories, { showId: true });
   renderAgents('agentsList', agents, false);
-  renderTickets(tickets);
+  renderTickets(tickets, agents);
   renderTokens(memories, archive, digests);
 
   // Quota tab — cache latest data so window selector can re-render without re-fetch
