@@ -94,6 +94,7 @@ for DEST in "${TARGETS[@]}"; do
 
     cp "$SCRIPT_DIR/server.py" "$DEST/server.py"
     cp "$SCRIPT_DIR/pyproject.toml" "$DEST/pyproject.toml"
+    [ -f "$SCRIPT_DIR/dashboard_live.py" ] && cp "$SCRIPT_DIR/dashboard_live.py" "$DEST/dashboard_live.py"
     [ -f "$SCRIPT_DIR/SKILL.md" ] && cp "$SCRIPT_DIR/SKILL.md" "$DEST/SKILL.md"
 
     [ -d "$SCRIPT_DIR/hooks" ] && mkdir -p "$DEST/hooks" && cp "$SCRIPT_DIR/hooks/"*.sh "$DEST/hooks/" 2>/dev/null && chmod +x "$DEST/hooks/"*.sh 2>/dev/null
