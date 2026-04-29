@@ -134,23 +134,19 @@ def _save_prj(p): _save(_prj_p(), p)
 
 def _mark_prev_kia(exclude=None, platform=None, agent_name=None):
     """Platform-scoped KIA: only kills agents on the SAME platform.
-    Agents from different platforms (claude, cursor, antigravity) coexist."""
+    Agents from different platforms (claude, cursor, antigravity) coexist.
+    Same name + same platform → handled by update logic in memory_agent_join, not KIA'd here."""
     agents = _load_agt(); changed = False
     for aid, info in agents.items():
         if aid == exclude or info.get("status") != AgentStatus.ACTIVE:
             continue
-        # Same name + same platform → rejoin (agent crashed/restarted)
-        if agent_name and info.get("agent_name") == agent_name and info.get("agent_platform") == platform:
-            info["status"] = AgentStatus.KIA
-            info["kia_at"] = _now()
-            info["kia_reason"] = "rejoin_same_identity"
-            changed = True
         # Same platform, different name → replaced (sequential per platform)
-        elif platform and info.get("agent_platform") == platform:
+        if platform and info.get("agent_platform") == platform and info.get("agent_name") != agent_name:
             info["status"] = AgentStatus.KIA
             info["kia_at"] = _now()
             info["kia_reason"] = "replaced_same_platform"
             changed = True
+        # Same name + same platform → skip (caller will update existing entry)
         # Different platform → LEAVE ALONE (multi-agent concurrency)
     if changed: _save_agt(agents)
 
@@ -475,13 +471,29 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
     if not prj: return "Error: Not initialized. Call `memory_init` first."
     _lazy_kia_sweep()  # clean up idle agents before joining
     _mark_prev_kia(platform=params.agent_platform, agent_name=params.agent_name)
-    aid = f"{params.agent_platform}-{_id()}"
     agents = _load_agt()
-    agents[aid] = {"agent_name": params.agent_name, "agent_platform": params.agent_platform,
-                   "agent_role": params.agent_role, "task_focus": params.task_focus, "status": AgentStatus.ACTIVE,
-                   "joined_at": _now(), "last_activity": time.time(), "memories_written": 0}
+    # Update existing active entry if same name+platform, otherwise create new
+    existing_aid = next(
+        (k for k, v in agents.items()
+         if v.get("agent_name") == params.agent_name
+         and v.get("agent_platform") == params.agent_platform
+         and v.get("status") == AgentStatus.ACTIVE),
+        None
+    )
+    rejoined = existing_aid is not None
+    if rejoined:
+        aid = existing_aid
+        agents[aid]["agent_role"] = params.agent_role
+        agents[aid]["task_focus"] = params.task_focus
+        agents[aid]["last_activity"] = time.time()
+    else:
+        aid = f"{params.agent_platform}-{_id()}"
+        agents[aid] = {"agent_name": params.agent_name, "agent_platform": params.agent_platform,
+                       "agent_role": params.agent_role, "task_focus": params.task_focus, "status": AgentStatus.ACTIVE,
+                       "joined_at": _now(), "last_activity": time.time(), "memories_written": 0}
     _save_agt(agents)
-    lines = [f"🟢 **On Board**: `{params.agent_name}` ({params.agent_platform})", f"ID: `{aid}`", ""]
+    status_line = "🔄 **Rejoined**" if rejoined else "🟢 **On Board**"
+    lines = [f"{status_line}: `{params.agent_name}` ({params.agent_platform})", f"ID: `{aid}`", ""]
     # Naming warning
     if params.agent_name == params.agent_platform or len(params.agent_name) < 5 or params.agent_name[0].isupper():
         lines.append("⚠️ **Naming tip**: Use format `platform-model-dateNsuffix` e.g. `claude-opus4.7-21apr26a` (lowercase, descriptive)\n")
@@ -1493,8 +1505,13 @@ class CreateTicketInput(BaseModel):
     agent_name: str = Field(..., description="Who is creating this ticket", min_length=1, max_length=100)
     title: str = Field(..., description="Short ticket title", min_length=1, max_length=200)
     description: str = Field(..., description="What needs to be done — be specific", min_length=1, max_length=5000)
+    target_url: str = Field(..., description="URL the executor must navigate to", min_length=1, max_length=500)
+    scope: str = Field(..., description="Execution scope: 'READ-ONLY', 'interactive-no-send', or 'interactive'", pattern="^(READ-ONLY|interactive-no-send|interactive)$")
+    required_fields: List[str] = Field(..., description="Deliverables the executor MUST capture (e.g. ['console-log', 'screenshot-load'])", min_length=1)
     priority: TicketPriority = Field(default=TicketPriority.MEDIUM)
     assigned_to: Optional[str] = Field(default=None, description="Agent name or platform to assign (e.g. 'cursor', 'codex'). Empty = any agent.")
+    forbidden: Optional[List[str]] = Field(default_factory=list, description="Actions the executor must NOT take (e.g. ['submit form', 'delete'])")
+    selector_hints: Optional[List[str]] = Field(default_factory=list, description="CSS/text hints to help locate UI elements")
     tags: Optional[List[str]] = Field(default_factory=list)
     related_files: Optional[List[str]] = Field(default_factory=list)
 
@@ -1547,6 +1564,11 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
         "id": ticket_id,
         "title": params.title,
         "description": params.description,
+        "target_url": params.target_url,
+        "scope": params.scope,
+        "required_fields": params.required_fields,
+        "forbidden": params.forbidden or [],
+        "selector_hints": params.selector_hints or [],
         "priority": params.priority,
         "status": TicketStatus.OPEN,
         "created_by": params.agent_name,
