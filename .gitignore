@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 .DS_Store
 
 # Agent shared memory (runtime data)

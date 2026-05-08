@@ -1,5 +1,16 @@
 # Changelog
 
+## v3.5.1 — uv Setup Templates (2026-05-09)
+
+**A small install-path release for running On Board from a source checkout with `uv`.**
+
+### Added
+- `uv sync` / `uv run --directory` install and MCP configuration docs for source checkouts
+- Generic `configs/uv-mcp.json` template for MCP clients that can launch through `uv`
+- `uv.lock` for reproducible local `uv sync` installs
+
+---
+
 ## v3.5.0 — Onboard Protocol (2026-05-09)
 
 **A tighter agent workflow release: one-call onboarding, XML protocol hints, ticket-linked memory, data-health checks, and dashboard linkage.**

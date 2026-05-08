@@ -15,20 +15,49 @@ On Board stores project context in `.agent-mem/` so Claude, Cursor, Codex, Claud
 
 ## Quick Start
 
+Recommended local checkout with `uv`:
+
 ```bash
-git clone https://github.com/swisspra/agent_mem_MCP.git
-cd agent_mem_MCP
+git clone https://github.com/swisspra/On_Board.git
+cd On_Board
+uv sync
+uv run python server.py
+```
+
+Use `uv run --directory` in MCP configs so the server always runs from this checkout:
+
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "uv",
+      "args": ["run", "--directory", "/full/path/to/On_Board", "python", "server.py"],
+      "env": { "AGENT_PROJECT_DIR": "/full/path/to/your/project" }
+    }
+  }
+}
+```
+
+This repo documents `uv run` for now, not `uvx`. `uvx` is better after On Board has a published package entrypoint/console script; until then, `uv run --directory` is the reliable checkout-based path.
+
+Classic venv install also works:
+
+```bash
+git clone https://github.com/swisspra/On_Board.git
+cd On_Board
 python3 -m venv venv
-./venv/bin/pip install httpx "mcp[cli]" pydantic
+./venv/bin/pip install -e .
 ```
 
 Use the full Python path from that venv when configuring clients:
 
 ```bash
-/full/path/to/agent_mem_MCP/venv/bin/python
+/full/path/to/On_Board/venv/bin/python
 ```
 
 ## MCP Client Setup
+
+For `uv`-based setup, use [configs/uv-mcp.json](configs/uv-mcp.json) as the base template for any MCP client that accepts JSON config.
 
 ### Claude Desktop
 
@@ -225,6 +254,15 @@ bash update.sh
 Restart clients after updating MCP server config or hook/rule files.
 
 ## Testing
+
+With `uv`:
+
+```bash
+uv sync --extra test
+uv run python -m pytest tests -q
+```
+
+With an existing venv:
 
 ```bash
 ./venv/bin/python -m pip install -e ".[test]"
