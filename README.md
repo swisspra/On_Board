@@ -1,43 +1,10 @@
-# 🧠 On Board — Cross-Platform Agent Shared Memory MCP
+# On Board - Cross-Platform Agent Shared Memory MCP
 
-**One project. One memory. Every platform.** When agents die, context survives.
+One project, one shared memory, every agent platform.
 
-## The Problem
-
-Multiple AI agents (Claude, Cursor, Codex, Claude Code, AntiGravity) work on the same project. When one dies (quota, crash), the next starts from zero. Decisions, discoveries, and context are lost.
-
-## The Solution
-
-A shared `.agent-mem/` directory inside your project that ALL agents read/write via MCP.
-
-```
-your-project/
-├── .agent-mem/              ← Runtime memory (gitignored)
-│   ├── memories.json        ← Entries stamped with agent_name
-│   ├── agents.json          ← Agent history (who, when, KIA?)
-│   ├── state.json           ← Shared key-value store
-│   ├── project.json         ← Project metadata
-│   ├── archive.json         ← Compacted old entries
-│   ├── digests.json         ← Compressed long-term memory
-│   ├── checkpoints/         ← Periodic snapshots
-│   └── tickets/             ← Cross-agent ticketing system
-└── CLAUDE.md / .cursorrules ← Agent rules
-```
-
-## What's New in v3.0.0
-
-- **Smarter KIA detection** — agents are now tracked with heartbeats and auto-marked KIA after 30min idle
-- **Better agent status** — more accurate active/offline tracking
-- **Dashboard improvements** — agents grouped by name, platform colors, orphan ticket warnings
-- **Naming convention** — agents get a naming tip on join for better traceability
-
-See [CHANGELOG.md](CHANGELOG.md) for details.
-
----
+On Board stores project context in `.agent-mem/` so Claude, Cursor, Codex, Claude Code, AntiGravity, and other MCP clients can continue work without losing decisions, warnings, tickets, or handoffs.
 
 ## Quick Start
-
-### 1. Clone & setup
 
 ```bash
 git clone https://github.com/swisspra/agent_mem_MCP.git
@@ -46,18 +13,18 @@ python3 -m venv venv
 ./venv/bin/pip install httpx "mcp[cli]" pydantic
 ```
 
-### 2. Note your full Python path
+Use the full Python path from that venv when configuring clients:
 
 ```bash
-# Example: /Users/yourname/tools/agent-memory-mcp/venv/bin/python
+/full/path/to/agent_mem_MCP/venv/bin/python
 ```
 
-### 3. Configure your platform
+## MCP Client Setup
 
-<details>
-<summary><b>Claude Desktop</b></summary>
+### Claude Desktop
 
 Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
 ```json
 {
   "mcpServers": {
@@ -69,12 +36,11 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
   }
 }
 ```
-</details>
 
-<details>
-<summary><b>Cursor</b></summary>
+### Cursor
 
-Add to `.cursor/mcp.json`:
+Add to your project `.cursor/mcp.json`:
+
 ```json
 {
   "mcpServers": {
@@ -86,107 +52,146 @@ Add to `.cursor/mcp.json`:
   }
 }
 ```
-</details>
 
-<details>
-<summary><b>Claude Code</b></summary>
+### Claude Code
 
 ```bash
 claude mcp add agent-memory -- /full/path/to/venv/bin/python /full/path/to/server.py
 ```
-</details>
 
-<details>
-<summary><b>Codex (OpenAI)</b></summary>
+### Codex
 
 ```bash
 codex mcp add agent-memory \
   --env AGENT_PROJECT_DIR="/full/path/to/your/project" \
   -- /full/path/to/venv/bin/python /full/path/to/server.py
 ```
-</details>
 
-<details>
-<summary><b>AntiGravity (Gemini)</b></summary>
+To use Codex hooks, enable the experimental hook feature in `~/.codex/config.toml`:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+### AntiGravity
 
 Use the MCP settings UI:
-- **Command**: `/full/path/to/venv/bin/python`
-- **Arguments**: `/full/path/to/server.py`
-- **Environment**: `AGENT_PROJECT_DIR` = `/full/path/to/your/project`
-</details>
 
----
+- Command: `/full/path/to/venv/bin/python`
+- Arguments: `/full/path/to/server.py`
+- Environment: `AGENT_PROJECT_DIR=/full/path/to/your/project`
 
-## Usage
+## Project Installer
 
-### New project
+Run this from the target project root:
+
+```bash
+bash /path/to/agent_mem_MCP/setup-project.sh
 ```
+
+It installs project-local helper files:
+
+```text
+your-project/
+├── .agent-mem/                         Runtime memory, gitignored
+├── .agent-mem-hooks/                   Cursor and Claude Code hook scripts
+├── .codex/hooks.json                   Codex hook config
+├── .codex/hooks/                       Codex hook scripts
+├── .cursor/hooks.json                  Cursor hook config
+├── .claude/settings.json               Claude Code hook config
+├── .agent/rules/on-board-agent-memory.md  AntiGravity workspace rule
+├── AGENTS.md                           Codex rules
+├── CLAUDE.md                           Claude Code rules
+└── .cursorrules                        Cursor rules
+```
+
+If an existing config file is present, the installer leaves it alone and prints the template path to merge manually.
+
+## Agent Workflow
+
+First time in a new project:
+
+```text
 memory_init(description="My project", tech_stack="React/Node")
-memory_agent_join(agent_name="claude-opus4.7-21apr26a", agent_platform="claude")
+memory_agent_join(agent_name="claude-main", agent_platform="claude")
 ```
 
-### Existing project (first time)
-```
+First time in an existing project:
+
+```text
 memory_bootstrap(agent_name="claude-onboard", description="My project", tech_stack="React/Node")
 ```
 
-### Every subsequent agent
+Every later agent:
+
+```text
+memory_get_briefing()
+memory_agent_join(agent_name="codex-main", agent_platform="codex")
+memory_list_tickets()
+memory_write(...)
+memory_checkpoint(...)
+memory_handoff(...)
 ```
-memory_get_briefing()                    ← read full context
-memory_agent_join(agent_name="...", agent_platform="...")
-... work ...
-memory_write(agent_name="...", memory_type="progress", title="...", content="...")
-memory_checkpoint(agent_name="...", summary="...")
-memory_handoff(agent_name="...", summary="...", next_steps=["..."])
+
+Use stable agent names such as `claude-main`, `cursor-coder`, or `codex-main`. Keep the same name across sessions; do not put dates, model names, or session IDs in `agent_name`.
+
+## Ticket Workflow
+
+Use tickets when work needs to move between agents:
+
+- `memory_create_ticket` - request help or assign work
+- `memory_claim_ticket` - pick up assigned or open work
+- `memory_submit_ticket` - submit completed work for review
+- `memory_review_ticket` - approve or reject submitted work
+- `memory_cancel_ticket` - cancel a ticket you created
+- `memory_terminate_ticket` - force-close a ticket you created
+- `memory_list_tickets` - inspect open, claimed, submitted, and closed tickets
+
+## Tools
+
+On Board currently exposes 25 MCP tools.
+
+Core:
+`memory_init`, `memory_bootstrap`, `memory_agent_join`, `memory_get_briefing`, `memory_status`, `memory_handoff`
+
+Memory:
+`memory_write`, `memory_read`, `memory_search`, `memory_pin`
+
+State and context:
+`memory_checkpoint`, `memory_update_state`, `memory_context_dirs`, `memory_context_read`
+
+Compaction:
+`memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive`
+
+Tickets:
+`memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets`
+
+## Runtime Data
+
+`.agent-mem/` contains project memory:
+
+```text
+.agent-mem/
+├── project.json
+├── agents.json
+├── memories.json
+├── state.json
+├── archive.json
+├── digests.json
+├── checkpoints/
+└── tickets/
 ```
 
-### Agent Naming Convention
+## Environment
 
-Use: `{platform}-{model}-{date}{suffix}`
-- ✅ `claude-opus4.7-21apr26a`
-- ✅ `cursor-sonnet-ble-18apr26a`
-- ❌ `Antigravity` (too vague)
-- ❌ `claude-desktop-Opus4.6` (uppercase, includes "desktop")
-
----
-
-## Tools (23 total)
-
-| Category | Tool | Purpose |
-|----------|------|---------|
-| **Setup** | `memory_init` | Initialize `.agent-mem/` |
-| | `memory_bootstrap` | Auto-scan existing project |
-| **Agent** | `memory_agent_join` | Register (KIAs same-platform only) |
-| | `memory_handoff` | Formal handoff to next agent |
-| **Write** | `memory_write` | Write memory (stamped with name) |
-| **Read** | `memory_read` | Read with filters |
-| | `memory_search` | Full-text search |
-| **State** | `memory_checkpoint` | Full state snapshot |
-| | `memory_pin` | Pin/unpin critical entries |
-| | `memory_update_state` | Shared key-value store |
-| **Context** | `memory_get_briefing` | Full project briefing |
-| | `memory_status` | Quick dashboard |
-| | `memory_context_dirs` | List external ref dirs |
-| | `memory_context_read` | Read from external dirs |
-| **Tokens** | `memory_compact` | Compress old → save 70%+ |
-| | `memory_prepare_compaction` | Preview cold entries |
-| | `memory_token_usage` | Token breakdown report |
-| | `memory_search_archive` | Search compacted entries |
-| **Tickets** | `memory_create_ticket` | Request help from another agent |
-| | `memory_claim_ticket` | Pick up a ticket |
-| | `memory_submit_ticket` | Submit work for review |
-| | `memory_review_ticket` | Approve or reject |
-| | `memory_list_tickets` | List tickets |
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable | Default | Purpose |
+| --- | --- | --- |
 | `AGENT_PROJECT_DIR` | cwd | Project root path |
-| `AGENT_MEM_CONTEXT_DIRS` | — | Colon-separated external info dirs |
-| `AGENT_MEM_HOT_HOURS` | 24 | Hours to keep full detail |
-| `AGENT_MEM_MAX_HOT` | 50 | Max hot entries |
-| `AGENT_MEM_IDLE_KIA_MIN` | 30 | Minutes before idle agent auto-KIA |
+| `AGENT_MEM_CONTEXT_DIRS` | empty | Colon-separated external context directories |
+| `AGENT_MEM_HOT_HOURS` | 24 | Hours to keep full-detail hot memory |
+| `AGENT_MEM_MAX_HOT` | 50 | Max hot memory entries |
+| `AGENT_MEM_IDLE_KIA_MIN` | 30 | Minutes before idle active agents are marked KIA |
 
 ## Updating
 
@@ -194,12 +199,7 @@ Use: `{platform}-{model}-{date}{suffix}`
 bash update.sh
 ```
 
-Pulls latest, reinstalls deps, auto-deploys to detected copies. Restart your agents after.
-
-## Tips
-
-- **MANDATORY RULE**: Auto-save memory after EVERY code change
-- If applying to an existing project, tell your first agent to read the codebase, then compact for others
+Restart clients after updating MCP server config or hook/rule files.
 
 ## License
 
