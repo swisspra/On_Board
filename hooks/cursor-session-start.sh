@@ -15,7 +15,7 @@ if [ ! -d "$AGENT_MEM_DIR" ]; then
     # Return context telling agent to initialize
     cat <<EOF
 {
-  "additional_context": "⚠️ NO AGENT MEMORY FOUND at .agent-mem/\n\nThis project uses shared agent memory for multi-agent coordination.\nBEFORE doing anything else, run: memory_init\nThen: memory_agent_join with your unique agent_name\n\nYou are likely taking over from a previous agent that may have died (KIA)."
+  "additional_context": "⚠️ NO AGENT MEMORY FOUND at .agent-mem/\n\nThis project uses shared agent memory for multi-agent coordination.\n\n<on_board_protocol>\n  <required_first_call>memory_onboard</required_first_call>\n  <agent_identity>Use a stable agent_name. Do not include dates, model names, or session ids.</agent_identity>\n  <write_policy>Write after meaningful actions only.</write_policy>\n  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>\n  <handoff_policy>Always handoff before leaving.</handoff_policy>\n</on_board_protocol>\n\nBEFORE doing anything else, run: memory_init\nThen: memory_onboard with your stable agent_name and platform\n\nYou are likely taking over from a previous agent that may have died (KIA)."
 }
 EOF
     exit 0
@@ -79,7 +79,7 @@ fi
 # Output context for Cursor to inject
 cat <<EOF
 {
-  "additional_context": "🧠 AGENT SHARED MEMORY ACTIVE\n$BRIEFING\n\n⚡ MANDATORY PROTOCOL:\n1. Call memory_agent_join with YOUR unique agent_name NOW\n2. Call memory_get_briefing for FULL context\n3. Call memory_write after EVERY significant action\n4. Call memory_checkpoint every 10-15 min\n5. Call memory_handoff before finishing\n6. Your agent_name is stamped on everything — you are accountable!",
+  "additional_context": "🧠 AGENT SHARED MEMORY ACTIVE\n$BRIEFING\n\n<on_board_protocol>\n  <required_first_call>memory_onboard</required_first_call>\n  <agent_identity>Use a stable agent_name. Do not include dates, model names, or session ids.</agent_identity>\n  <write_policy>Write after meaningful actions only.</write_policy>\n  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>\n  <handoff_policy>Always handoff before leaving.</handoff_policy>\n</on_board_protocol>\n\n⚡ MANDATORY PROTOCOL:\n1. Call memory_onboard with your stable agent_name and platform NOW\n2. Call memory_write after significant actions\n3. Call memory_checkpoint every 10-15 min\n4. Call memory_handoff before finishing\n5. Your agent_name is stamped on everything — you are accountable!",
   "env": {
     "AGENT_PROJECT_DIR": "${CURSOR_PROJECT_DIR:-.}",
     "AGENT_SESSION_ID": "$SESSION_ID"

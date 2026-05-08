@@ -120,6 +120,11 @@ h1{font-size:20px;font-weight:600;letter-spacing:-.02em}
 .ticket-id{font:11px var(--mono);color:var(--dim)}
 .ticket-title{font-weight:500;margin-top:2px}
 .ticket-meta{font:11px var(--mono);color:var(--muted);margin-top:2px}
+.link-item{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12.5px}
+.link-item:last-child{border:0}
+.link-title{font-weight:600;margin-bottom:3px}
+.link-meta{font:11px var(--mono);color:var(--muted);line-height:1.5}
+.health-ok{color:var(--live)}.health-warn{color:var(--warn)}
 .pri-low{color:#22c55e}.pri-medium{color:#f59e0b}.pri-high{color:#f97316}.pri-critical{color:#ef4444}
 .st-open{color:#f59e0b}.st-in_progress{color:#3b82f6}.st-in_review{color:#a855f7}.st-closed{color:#22c55e}.st-rejected{color:#ef4444}
 .type-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
@@ -166,6 +171,7 @@ section{display:none}section.active{display:block}
     <div class="nav-item" data-tab="timeline">📜 Timeline<span class="badge" id="navTimelineCount">–</span></div>
     <div class="nav-item" data-tab="agents">👥 Agents<span class="badge" id="navAgentCount">–</span></div>
     <div class="nav-item" data-tab="tickets">🎫 Tickets<span class="badge" id="navTicketCount">–</span></div>
+    <div class="nav-item" data-tab="links">🕸️ Links</div>
     <div class="nav-item" data-tab="tokens">📊 Tokens</div>
     <div class="nav-item" data-tab="quota">⚡ Quota Saved</div>
     <div class="sidebar-foot">
@@ -203,6 +209,14 @@ section{display:none}section.active{display:block}
     <section id="tab-tickets">
       <div class="sub">Cross-agent task management</div>
       <div class="card"><div class="card-head">All Tickets</div><div class="card-body" id="ticketsList"></div></div>
+    </section>
+
+    <section id="tab-links">
+      <div class="sub">Ticket, memory, file, agent, and tag linkage</div>
+      <div class="grid2">
+        <div class="card"><div class="card-head">Memory Links</div><div class="card-body" id="linksList"></div></div>
+        <div class="card"><div class="card-head">Data Health</div><div class="card-body" id="healthList"></div></div>
+      </div>
     </section>
 
     <section id="tab-tokens">
@@ -430,6 +444,100 @@ function renderTickets(tickets, agents) {
   }).join('');
 }
 
+function hasShared(a, b) {
+  const bs = new Set((b || []).map(x => String(x).toLowerCase()));
+  return (a || []).some(x => bs.has(String(x).toLowerCase()));
+}
+
+function memoryTicketScore(m, t) {
+  let score = 0;
+  const tid = String(t.id || '');
+  const text = [m.title || '', m.content || '', (m.tags || []).join(' '), (m.related_files || []).join(' '), (m.related_tickets || []).join(' ')].join(' ').toLowerCase();
+  if (tid && text.includes(tid.toLowerCase())) score += 50;
+  if ((m.related_tickets || []).includes(tid)) score += 80;
+  if (hasShared(m.related_files, t.related_files)) score += 25;
+  if (hasShared(m.tags, t.tags)) score += 12;
+  score += (m.priority || 0) * 3;
+  if (m.pinned) score += 5;
+  return score;
+}
+
+function buildLinkData(memories, tickets, agents) {
+  const ticketLinks = tickets.map(t => {
+    const related = memories
+      .map(m => ({ memory: m, score: memoryTicketScore(m, t) }))
+      .filter(x => x.score > 0)
+      .sort((a,b) => b.score - a.score)
+      .slice(0, 5);
+    return { ticket: t, related };
+  }).sort((a,b) => b.related.length - a.related.length);
+
+  const fileMap = {};
+  const tagMap = {};
+  const activeNames = new Set(Object.values(agents || {}).filter(a => a.status === 'active').map(a => a.agent_name));
+  const activeIdentity = {};
+  const health = [];
+
+  for (const a of Object.values(agents || {})) {
+    if (a.status !== 'active') continue;
+    const key = (a.agent_name || '?') + '|' + (a.agent_platform || '?');
+    activeIdentity[key] = (activeIdentity[key] || 0) + 1;
+  }
+  Object.entries(activeIdentity).forEach(([k, count]) => {
+    if (count > 1) health.push('duplicate active agent identity: ' + k.replace('|', ' on ') + ' (' + count + ')');
+  });
+
+  memories.forEach(m => {
+    (m.related_files || []).forEach(f => {
+      if (!fileMap[f]) fileMap[f] = { memories: 0, tickets: 0 };
+      fileMap[f].memories++;
+    });
+    (m.tags || []).forEach(t => { tagMap[t] = (tagMap[t] || 0) + 1; });
+  });
+  tickets.forEach(t => {
+    (t.related_files || []).forEach(f => {
+      if (!fileMap[f]) fileMap[f] = { memories: 0, tickets: 0 };
+      fileMap[f].tickets++;
+    });
+    if (t.claimed_by && ['claimed','in_progress','submitted','reviewing','in_review'].includes(t.status) && !activeNames.has(t.claimed_by)) {
+      health.push('orphaned ticket ' + (t.id || '?') + ': claimed by ' + t.claimed_by);
+    }
+    if (!['closed','canceled','terminated'].includes(t.status)) {
+      ['target_url','scope','required_fields'].forEach(field => {
+        if (!t[field] || (Array.isArray(t[field]) && !t[field].length)) health.push('invalid ticket schema ' + (t.id || '?') + ': missing ' + field);
+      });
+    }
+  });
+
+  return { ticketLinks, fileMap, tagMap, health };
+}
+
+function renderLinks(memories, tickets, agents) {
+  const data = buildLinkData(memories, tickets, agents);
+  const linkEl = document.getElementById('linksList');
+  const healthEl = document.getElementById('healthList');
+  const ticketBlocks = data.ticketLinks.filter(x => x.related.length).slice(0, 12).map(x => {
+    const t = x.ticket;
+    const rel = x.related.map(r => '<div class="link-meta">↳ [' + esc(r.memory.memory_type || '?') + '] ' + esc(r.memory.title || '') + ' · ' + esc(r.memory.agent_name || '?') + ' · score ' + r.score + '</div>').join('');
+    return '<div class="link-item"><div class="link-title">🎫 ' + esc(t.id || '') + ' · ' + esc(t.title || '') + '</div>' +
+      '<div class="link-meta">' + esc(t.status || '?') + ' · ' + esc(t.priority || '?') + ' · files: ' + esc((t.related_files || []).join(', ') || 'none') + '</div>' + rel + '</div>';
+  }).join('');
+  const fileBlocks = Object.entries(data.fileMap).sort((a,b) => ((b[1].memories + b[1].tickets) - (a[1].memories + a[1].tickets))).slice(0, 10)
+    .map(([f, c]) => '<div class="link-item"><div class="link-title">📁 ' + esc(f) + '</div><div class="link-meta">' + c.memories + ' memories · ' + c.tickets + ' tickets</div></div>').join('');
+  const tagBlocks = Object.entries(data.tagMap).sort((a,b) => b[1] - a[1]).slice(0, 10)
+    .map(([t, c]) => '<span class="type-pill" style="margin:4px;display:inline-block">' + esc(t) + ' ' + c + '</span>').join('');
+
+  linkEl.innerHTML = (ticketBlocks || '<div class="empty">No ticket-memory links yet.</div>') +
+    (fileBlocks ? '<div class="card-head">File Links</div>' + fileBlocks : '') +
+    (tagBlocks ? '<div class="card-head">Tags</div><div style="padding:10px">' + tagBlocks + '</div>' : '');
+
+  if (!data.health.length) {
+    healthEl.innerHTML = '<div class="empty health-ok">No linkage/data-health warnings.</div>';
+  } else {
+    healthEl.innerHTML = data.health.map(w => '<div class="link-item health-warn">⚠️ ' + esc(w) + '</div>').join('');
+  }
+}
+
 function renderTokens(memories, archive, digests) {
   const hot = memories.reduce((s, m) => s + Math.floor((m.title||'').length/4) + Math.floor((m.content||'').length/4), 0);
   const arc = archive.reduce((s, m) => s + Math.floor((m.title||'').length/4) + Math.floor((m.content||'').length/4), 0);
@@ -631,6 +739,7 @@ async function refresh() {
   renderMemories('timeline', memories, { showId: true });
   renderAgents('agentsList', agents, false);
   renderTickets(tickets, agents);
+  renderLinks(memories, tickets, agents);
   renderTokens(memories, archive, digests);
 
   // Quota tab — cache latest data so window selector can re-render without re-fetch

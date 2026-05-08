@@ -24,50 +24,73 @@ Their decisions, discoveries, warnings, and progress are saved in memory.
 
 ## GET ON BOARD — MANDATORY PROTOCOL
 
-### Step 1: READ (before doing ANYTHING)
+<on_board_protocol>
+  <required_first_call>memory_onboard</required_first_call>
+  <agent_identity>Use a stable agent_name. Do not include dates, model names, or session ids.</agent_identity>
+  <write_policy>Write after meaningful actions only.</write_policy>
+  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>
+  <handoff_policy>Always handoff before leaving.</handoff_policy>
+</on_board_protocol>
+
+### Step 1: ONBOARD (before doing ANYTHING)
 ```
-memory_get_briefing()
+memory_onboard(
+  agent_name="<your-stable-name>",
+  agent_platform="<claude|cursor|codex|antigravity|other>",
+  agent_role="<main|reviewer|utility|planner>",
+  mode="normal"
+)
 ```
-Read the full project context. This contains:
+This registers you, reads the briefing, shows open tickets, and checks data health.
+The briefing contains:
 - What the project is about
 - What previous agents did
 - What decisions were made and WHY
 - What's broken / blocked
 - What tickets are waiting for you
 
-### Step 2: JOIN (register yourself)
+Use `mode="brief"` for fast catchup, `mode="deep"` when context is unclear,
+and `mode="handoff-only"` when you only need the latest transfer state.
+For a specific ticket, pass `ticket_id="TK-xxx"`. For setup issues, run `memory_doctor()`.
+
+Fallback if `memory_onboard` is not available:
 ```
+memory_get_briefing(mode="normal")
 memory_agent_join(
   agent_name="<your-stable-name>",
   agent_platform="<claude|cursor|codex|antigravity|other>",
   agent_role="<main|reviewer|utility|planner>"
 )
 ```
+
 Rules for agent_name:
 - Use a STABLE name: `cursor-coder`, `claude-reviewer`, `codex-main`
 - Do NOT put dates, model names, or session IDs in your name
 - Keep the SAME name across sessions
 
-### Step 3: CHECK TICKETS
+### Step 2: CHECK TICKETS
 ```
 memory_list_tickets()
 ```
 Someone may have created a ticket for you. Claim it if relevant.
 
-### Step 4: WORK (write after EVERY action)
-After EVERY code change, decision, or discovery:
+### Step 3: WORK (write after significant action)
+After each significant code change, decision, discovery, blocker, or warning:
 ```
 memory_write(
   agent_name="<your-name>",
   memory_type="progress|decision|file_change|discovery|warning|blocker",
   title="Short description",
-  content="Detailed description with file names and reasoning"
+  content="Detailed description with file names and reasoning",
+  related_files=["server.py"],
+  related_tickets=["TK-xxx"]
 )
 ```
-Do NOT batch writes. Write immediately after each action.
+Do NOT batch important context. Write immediately after each significant action.
 If you die mid-task, these writes are ALL the next agent has.
+Use `memory_links(ticket_id="TK-xxx")` when you need to see how memories, tickets, files, agents, and tags connect.
 
-### Step 5: CHECKPOINT (every 10-15 minutes)
+### Step 4: CHECKPOINT (every 10-15 minutes)
 ```
 memory_checkpoint(
   agent_name="<your-name>",
@@ -77,7 +100,7 @@ memory_checkpoint(
 )
 ```
 
-### Step 6: HANDOFF (before you finish)
+### Step 5: HANDOFF (before you finish)
 ```
 memory_handoff(
   agent_name="<your-name>",
@@ -100,6 +123,9 @@ memory_create_ticket(
   agent_name="<your-name>",
   title="Fix CSS bug on WiFi page",
   description="Buttons overlap on mobile < 375px",
+  target_url="http://localhost:3000/wifi",
+  scope="interactive-no-send",
+  required_fields=["screenshot", "files_changed", "verification"],
   priority="high",
   assigned_to="cursor"
 )
@@ -165,9 +191,9 @@ You ARE an LLM — summarize yourself instead of paying for another API call.
 
 ## CONSEQUENCES
 
-- ⛔ `memory_write` will BLOCK you if you haven't called `memory_agent_join`
-- ⛔ `memory_checkpoint` will BLOCK you if you haven't joined
-- ⛔ `memory_handoff` will BLOCK you if you haven't joined
+- ⛔ `memory_write` will BLOCK you if you haven't called `memory_onboard` or `memory_agent_join`
+- ⛔ `memory_checkpoint` and `memory_handoff` will BLOCK you if you haven't joined
+- ⛔ ticket mutation tools (`memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, cancel/terminate) will BLOCK you if you haven't joined
 - 💀 If you die without writing, the next agent starts from zero
 - 🔄 If you skip the briefing, you'll redo work that's already done
 - 📛 Your agent_name is stamped on every entry — you are accountable

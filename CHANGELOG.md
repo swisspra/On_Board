@@ -1,6 +1,48 @@
 # Changelog
 
-## v3.2.0 — Agent Rejoin Dedup (2026-04-24)
+## v3.5.0 — Onboard Protocol (2026-05-09)
+
+**A tighter agent workflow release: one-call onboarding, XML protocol hints, ticket-linked memory, data-health checks, and dashboard linkage.**
+
+### Added
+- `memory_onboard` as the primary one-call agent entrypoint: join session, read briefing, inspect tickets, and surface data-health warnings
+- XML protocol tags in onboarding output, generated rules, and start hooks to improve agent instruction-following
+- `memory_get_briefing(ticket_id=...)` for ticket-scoped onboarding with ticket details and related memories
+- `memory_links` for viewing ticket, memory, file, agent, and tag linkage
+- `memory_doctor` data-integrity warnings for duplicate active agent identities, orphaned claimed tickets, invalid ticket schemas, and duplicate memory IDs
+- pytest workflow harness for docs/protocol drift, ticket-focused briefing, doctor integrity checks, and vector-style search
+
+### Changed
+- `SKILL.md` now matches the significant-action memory protocol and current ticket schema
+- Ticket mutation tools now require an onboarded/joined agent before claim, submit, review, cancel, or terminate
+- `memory_write` now accepts `related_tickets` and skips exact recent duplicates
+- Live dashboard now includes a Links/Data Health tab
+
+---
+
+## v3.2.0 — Workflow UX (2026-05-08)
+
+**Improved the daily agent workflow: cleaner briefing modes, setup diagnosis, ranked search, and opt-in local vector-style search.**
+
+### Added
+- `memory_get_briefing(mode=...)` with `brief`, `normal`, `deep`, and `handoff-only`
+- `memory_doctor` for read-only checks of hooks, rules, runtime memory, and ignored paths
+- `memory_search_vector` with opt-in local backend (`AGENT_MEM_VECTOR_BACKEND=local`)
+
+### Changed
+- `memory_search` and archive search now rank by relevance, priority, pinned state, and recency
+- Compaction output now gives a clearer review-first workflow
+- `.agent-mem/*.json` remains the source of truth; vector-style search is a cache/search aid only
+
+### Upgrade
+```bash
+bash update.sh
+# Restart Claude Desktop / Cursor / Codex
+```
+
+---
+
+## v3.1.1 — Agent Rejoin Dedup (2026-04-24)
 
 **Fix: `memory_agent_join` no longer creates duplicate entries when the same agent rejoins.**
 

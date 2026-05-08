@@ -104,12 +104,22 @@ RULES_NOTE="
 # On Board — Agent Shared Memory Protocol
 
 This project uses .agent-mem/ for multi-agent coordination.
+
+<on_board_protocol>
+  <required_first_call>memory_onboard</required_first_call>
+  <agent_identity>Use a stable agent_name. Do not include dates, model names, or session ids.</agent_identity>
+  <write_policy>Write after meaningful actions only.</write_policy>
+  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>
+  <handoff_policy>Always handoff before leaving.</handoff_policy>
+</on_board_protocol>
+
 Get On Board before starting ANY work:
-1. Call memory_get_briefing to read full context
-2. Call memory_agent_join with your unique agent_name
-3. Call memory_write after EVERY significant action
-4. Call memory_checkpoint every 10-15 minutes
-5. Call memory_handoff before you finish
+1. Call memory_onboard with your stable agent_name and platform
+2. Call memory_write after every significant action
+3. Call memory_checkpoint every 10-15 minutes
+4. Call memory_handoff before you finish
+
+If memory_onboard is not available, call memory_get_briefing first, then memory_agent_join.
 
 When coordinating work between agents:
 - Use memory_create_ticket to request help and assign it to a specific agent or platform when needed

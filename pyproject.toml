@@ -1,6 +1,6 @@
 [project]
 name = "onboard-memory-mcp"
-version = "3.2.0"
+version = "3.5.0"
 description = "On Board — Cross-platform shared memory MCP for multi-agent project coordination. One project, one memory, every platform."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -10,6 +10,11 @@ dependencies = [
     "mcp[cli]>=1.0.0",
     "pydantic>=2.0.0",
     "httpx>=0.25.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0",
 ]
 
 [build-system]

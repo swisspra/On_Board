@@ -31,11 +31,25 @@ def emit_context(text: str) -> None:
     )
 
 
+ON_BOARD_PROTOCOL = "\n".join(
+    [
+        "<on_board_protocol>",
+        "  <required_first_call>memory_onboard</required_first_call>",
+        "  <agent_identity>Use a stable agent_name. Do not include dates, model names, or session ids.</agent_identity>",
+        "  <write_policy>Write after meaningful actions only.</write_policy>",
+        "  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>",
+        "  <handoff_policy>Always handoff before leaving.</handoff_policy>",
+        "</on_board_protocol>",
+    ]
+)
+
+
 if not mem_dir.is_dir():
     emit_context(
         "⚠️ NO AGENT MEMORY FOUND at .agent-mem/\n\n"
         "This project uses shared agent memory for multi-agent coordination.\n"
-        "Before doing anything else, run memory_init, then memory_agent_join.\n"
+        f"{ON_BOARD_PROTOCOL}\n\n"
+        "Before doing anything else, run memory_init, then memory_onboard.\n"
         f"Current Codex session: {session_id}"
     )
     raise SystemExit(0)
@@ -79,8 +93,9 @@ if memories_file.exists():
         lines.append(handoff.get("content", "")[:800])
     lines.append(f"\n📚 {len(entries)} total memories")
 
+lines.append("\n" + ON_BOARD_PROTOCOL)
 lines.append(
-    "\n⚡ PROTOCOL: memory_agent_join → memory_get_briefing → work → "
+    "\n⚡ PROTOCOL: memory_onboard → work → "
     "memory_write → memory_checkpoint → memory_handoff"
 )
 

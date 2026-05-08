@@ -4,6 +4,15 @@ One project, one shared memory, every agent platform.
 
 On Board stores project context in `.agent-mem/` so Claude, Cursor, Codex, Claude Code, AntiGravity, and other MCP clients can continue work without losing decisions, warnings, tickets, or handoffs.
 
+## v3.5 Highlights
+
+- `memory_onboard` is now the preferred first call for every agent session.
+- XML protocol tags are included in onboarding, generated rules, and start hooks to make agent instructions harder to miss.
+- Ticket-focused briefing, `related_tickets`, and `memory_links` connect tickets, memories, files, agents, and tags.
+- `memory_doctor` and the live dashboard now surface data-health and linkage warnings.
+- Ticket mutations are blocked until the agent is on board.
+- A pytest suite now covers workflow behavior, docs/protocol drift, and dashboard linkage.
+
 ## Quick Start
 
 ```bash
@@ -116,7 +125,7 @@ First time in a new project:
 
 ```text
 memory_init(description="My project", tech_stack="React/Node")
-memory_agent_join(agent_name="claude-main", agent_platform="claude")
+memory_onboard(agent_name="claude-main", agent_platform="claude")
 ```
 
 First time in an existing project:
@@ -128,9 +137,7 @@ memory_bootstrap(agent_name="claude-onboard", description="My project", tech_sta
 Every later agent:
 
 ```text
-memory_get_briefing(mode="normal")
-memory_agent_join(agent_name="codex-main", agent_platform="codex")
-memory_list_tickets()
+memory_onboard(agent_name="codex-main", agent_platform="codex", mode="normal")
 memory_write(...)
 memory_checkpoint(...)
 memory_handoff(...)
@@ -143,11 +150,15 @@ Briefing modes:
 - `deep` - broader project history when context is unclear
 - `handoff-only` - fastest transfer check
 
+For ticket work, use `memory_get_briefing(ticket_id="TK-...")` to include the ticket spec and related memories.
+Use `memory_links(ticket_id="TK-...")` to inspect ticket, memory, file, agent, and tag linkage.
+Use `memory_onboard(ticket_id="TK-...")` when starting a session for a specific ticket.
+
 Use stable agent names such as `claude-main`, `cursor-coder`, or `codex-main`. Keep the same name across sessions; do not put dates, model names, or session IDs in `agent_name`.
 
 ## Ticket Workflow
 
-Use tickets when work needs to move between agents:
+Use tickets when work needs to move between agents. Ticket mutations require the agent to be on board first:
 
 - `memory_create_ticket` - request help or assign work
 - `memory_claim_ticket` - pick up assigned or open work
@@ -159,13 +170,13 @@ Use tickets when work needs to move between agents:
 
 ## Tools
 
-On Board currently exposes 27 MCP tools.
+On Board currently exposes 29 MCP tools.
 
 Core:
-`memory_init`, `memory_bootstrap`, `memory_agent_join`, `memory_get_briefing`, `memory_status`, `memory_doctor`, `memory_handoff`
+`memory_init`, `memory_bootstrap`, `memory_onboard`, `memory_agent_join`, `memory_get_briefing`, `memory_status`, `memory_doctor`, `memory_handoff`
 
 Memory:
-`memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_pin`
+`memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links`, `memory_pin`
 
 State and context:
 `memory_checkpoint`, `memory_update_state`, `memory_context_dirs`, `memory_context_read`
@@ -212,6 +223,13 @@ bash update.sh
 ```
 
 Restart clients after updating MCP server config or hook/rule files.
+
+## Testing
+
+```bash
+./venv/bin/python -m pip install -e ".[test]"
+./venv/bin/python -m pytest tests -q
+```
 
 ## License
 

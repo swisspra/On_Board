@@ -53,7 +53,16 @@ if mf.exists():
         lines.append(h.get('content','')[:800])
     lines.append(f'\\n📚 {len(entries)} total memories')
 
-lines.append('\\n⚡ PROTOCOL: memory_agent_join → memory_get_briefing → work → memory_write → memory_checkpoint → memory_handoff')
+lines.extend([
+    '\\n<on_board_protocol>',
+    '  <required_first_call>memory_onboard</required_first_call>',
+    '  <agent_identity>Use a stable agent_name. Do not include dates, model names, or session ids.</agent_identity>',
+    '  <write_policy>Write after meaningful actions only.</write_policy>',
+    '  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>',
+    '  <handoff_policy>Always handoff before leaving.</handoff_policy>',
+    '</on_board_protocol>',
+])
+lines.append('\\n⚡ PROTOCOL: memory_onboard → work → memory_write → memory_checkpoint → memory_handoff')
 print('\\n'.join(lines))
 " 2>/dev/null
 
