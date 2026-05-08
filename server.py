@@ -15,7 +15,7 @@ Design principles:
 Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
-import json, os, time, hashlib
+import json, os, time, hashlib, math, re
 from datetime import datetime
 from typing import Optional, List
 from enum import Enum
@@ -40,6 +40,7 @@ HOT_WINDOW_HOURS = int(os.environ.get("AGENT_MEM_HOT_HOURS", "24"))
 MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 COMPACT_MODEL = os.environ.get("AGENT_MEM_MODEL", "claude-sonnet-4-20250514")
+VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()
 
 # ── Multi-Agent Concurrency Config ──────────────────────
 # Idle detection: agents with no heartbeat for this long get auto-KIA'd
@@ -84,31 +85,60 @@ class AgentStatus(str, Enum):
 class ResponseFormat(str, Enum):
     MARKDOWN="markdown"; JSON="json"
 
+class BriefingMode(str, Enum):
+    BRIEF="brief"; NORMAL="normal"; DEEP="deep"; HANDOFF_ONLY="handoff-only"
+
+class VectorBackend(str, Enum):
+    NONE="none"; LOCAL="local"
+
 # ── Storage ─────────────────────────────────────────────
+class JsonMemoryStore:
+    """Project-local JSON store. Keep all persistence behind this boundary."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.memory_dir = root / ".agent-mem"
+
+    def ensure(self):
+        self.memory_dir.mkdir(parents=True, exist_ok=True)
+        (self.memory_dir / "checkpoints").mkdir(exist_ok=True)
+        gi = self.root / ".gitignore"
+        marker = ".agent-mem/"
+        if gi.exists():
+            content = gi.read_text()
+            if marker not in content:
+                with open(gi, "a") as f:
+                    f.write("\n# Agent shared memory — runtime data, do NOT commit\n.agent-mem/\n")
+        else:
+            with open(gi, "w") as f:
+                f.write("# Agent shared memory — runtime data, do NOT commit\n.agent-mem/\n")
+
+    def load(self, fp: Path):
+        if fp.exists():
+            with open(fp, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def save(self, fp: Path, data):
+        self.ensure()
+        tmp = fp.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+        tmp.rename(fp)
+
+    def path(self, name: str) -> Path:
+        return self.memory_dir / name
+
+STORE = JsonMemoryStore(PROJECT_ROOT)
+
 def _ensure():
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    (MEMORY_DIR / "checkpoints").mkdir(exist_ok=True)
-    gi = PROJECT_ROOT / ".gitignore"
-    marker = ".agent-mem/"
-    if gi.exists():
-        content = gi.read_text()
-        if marker not in content:
-            with open(gi, "a") as f:
-                f.write("\n# Agent shared memory — runtime data, do NOT commit\n.agent-mem/\n")
-    else:
-        with open(gi, "w") as f:
-            f.write("# Agent shared memory — runtime data, do NOT commit\n.agent-mem/\n")
+    STORE.ensure()
 
 def _load(fp):
-    if fp.exists():
-        with open(fp, "r", encoding="utf-8") as f: return json.load(f)
-    return {}
+    return STORE.load(fp)
 
 def _save(fp, data):
-    _ensure()
-    tmp = fp.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f: json.dump(data, f, indent=2, ensure_ascii=False, default=str)
-    tmp.rename(fp)
+    STORE.save(fp, data)
 
 def _local_now() -> datetime:
     return datetime.now().astimezone()
@@ -213,6 +243,143 @@ def _count_mem_tokens(memories: list) -> int:
         total += _estimate_tokens(m.get("title", ""))
         total += _estimate_tokens(m.get("content", ""))
     return total
+
+def _rank_memory_hits(query: str, memories: list) -> list:
+    """Rank memory hits by relevance, then recency.
+
+    This intentionally stays local and deterministic. It improves keyword search
+    without introducing a vector backend or changing the JSON source of truth.
+    """
+    q = query.lower().strip()
+    terms = [t for t in q.split() if t]
+    now = time.time()
+    type_weight = {
+        "blocker": 8,
+        "warning": 7,
+        "decision": 6,
+        "handoff": 6,
+        "checkpoint": 4,
+        "todo": 4,
+        "discovery": 3,
+        "context": 2,
+        "file_change": 2,
+        "progress": 1,
+    }
+    ranked = []
+
+    for m in memories:
+        title = str(m.get("title", "")).lower()
+        content = str(m.get("content", "")).lower()
+        tags = " ".join(m.get("tags", [])).lower()
+        agent = str(m.get("agent_name", "")).lower()
+        files = " ".join(m.get("related_files", [])).lower()
+        haystack = f"{title} {content} {tags} {agent} {files}"
+
+        if q not in haystack and not any(t in haystack for t in terms):
+            continue
+
+        score = 0
+        if q in title: score += 18
+        if q in tags: score += 14
+        if q in files: score += 12
+        if q in agent: score += 8
+        if q in content: score += 6
+
+        for term in terms:
+            if term in title: score += 5
+            if term in tags: score += 4
+            if term in files: score += 4
+            if term in content: score += 1
+
+        score += type_weight.get(m.get("memory_type", ""), 0)
+        score += int(m.get("priority", 0)) * 3
+        if m.get("pinned"):
+            score += 8
+
+        age_hours = (now - m.get("timestamp", 0)) / 3600 if m.get("timestamp") else 9999
+        if age_hours <= 24:
+            score += 4
+        elif age_hours <= 24 * 7:
+            score += 2
+
+        ranked.append((score, m.get("timestamp", 0), m))
+
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return ranked
+
+def _tokenize_for_vector(text: str) -> list:
+    return re.findall(r"[a-z0-9_./-]+", text.lower())
+
+def _local_vector(text: str) -> dict:
+    vec = {}
+    for token in _tokenize_for_vector(text):
+        vec[token] = vec.get(token, 0) + 1
+    return vec
+
+def _cosine_similarity(a: dict, b: dict) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(weight * b.get(token, 0) for token, weight in a.items())
+    norm_a = math.sqrt(sum(weight * weight for weight in a.values()))
+    norm_b = math.sqrt(sum(weight * weight for weight in b.values()))
+    if not norm_a or not norm_b:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+def _memory_search_text(m: dict) -> str:
+    return " ".join([
+        str(m.get("title", "")),
+        str(m.get("content", "")),
+        " ".join(m.get("tags", [])),
+        str(m.get("agent_name", "")),
+        " ".join(m.get("related_files", [])),
+        str(m.get("memory_type", "")),
+    ])
+
+def _local_vector_search(query: str, memories: list) -> list:
+    query_vec = _local_vector(query)
+    ranked = []
+    for m in memories:
+        similarity = _cosine_similarity(query_vec, _local_vector(_memory_search_text(m)))
+        if similarity <= 0:
+            continue
+        score = similarity
+        score += int(m.get("priority", 0)) * 0.03
+        if m.get("pinned"):
+            score += 0.08
+        ranked.append((score, m.get("timestamp", 0), m))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return ranked
+
+def _doctor_file(path: Path, label: str, required: bool = True, executable: bool = False, json_file: bool = False) -> tuple:
+    if not path.exists():
+        display = path.relative_to(PROJECT_ROOT) if path.is_relative_to(PROJECT_ROOT) else path
+        if required:
+            return "missing", f"- ❌ {label}: missing `{display}`"
+        return "optional-missing", f"- ⚪ {label}: not installed `{display}`"
+    if executable and not os.access(path, os.X_OK):
+        return "warn", f"- ⚠️ {label}: exists but is not executable `{path}`"
+    if json_file:
+        try:
+            json.loads(path.read_text(encoding="utf-8"))
+        except Exception as ex:
+            return "fail", f"- ❌ {label}: invalid JSON `{path}` ({ex})"
+    return "ok", f"- ✅ {label}: ok"
+
+def _doctor_gitignore() -> tuple:
+    gi = PROJECT_ROOT / ".gitignore"
+    if not gi.exists():
+        return "fail", "- ❌ .gitignore: missing"
+    content = gi.read_text(encoding="utf-8", errors="replace")
+    required = [".agent-mem/"]
+    local_only = [".agent/", ".agent-mem-hooks/", ".claude/", ".codex/", ".cursor/", "AGENTS.md", "CLAUDE.md"]
+    missing_required = [entry for entry in required if entry not in content]
+    missing_local = [entry for entry in local_only if entry not in content]
+    if missing_required:
+        return "fail", f"- ❌ .gitignore: missing required runtime ignores: {', '.join(missing_required)}"
+    if missing_local:
+        return "warn", f"- ⚠️ .gitignore: runtime memory ignored; local helper ignores missing: {', '.join(missing_local)}"
+    return "ok", "- ✅ .gitignore: runtime/local paths ignored"
 
 async def _llm_summarize(entries: list, context: str = "") -> str:
     """Call Claude API to compress a batch of memories into a digest.
@@ -408,14 +575,19 @@ class HandoffInput(BaseModel):
 
 class BriefingInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    mode: Optional[BriefingMode] = Field(default=BriefingMode.NORMAL, description="Briefing workflow mode: brief, normal, deep, or handoff-only")
     focus_area: Optional[str] = None
     include_full_history: Optional[bool] = False
-    token_budget: Optional[int] = Field(default=4000, description="Max tokens for briefing output. Lower = cheaper. Default 4000.", ge=500, le=50000)
+    token_budget: Optional[int] = Field(default=None, description="Max tokens for briefing output. Overrides mode default.", ge=500, le=50000)
 
 class SearchInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     query: str = Field(..., min_length=1, max_length=200)
     limit: Optional[int] = Field(default=20, ge=1, le=100)
+
+class VectorSearchInput(SearchInput):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    backend: Optional[VectorBackend] = Field(default=None, description="Override AGENT_MEM_VECTOR_BACKEND. Supported: none, local")
 
 class PinInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -580,15 +752,51 @@ async def memory_read(params: MemoryReadInput) -> str:
 
 @mcp.tool(name="memory_search", annotations={"title":"Search Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_search(params: SearchInput) -> str:
-    """Search across all memories by text."""
-    mem = _load_mem(); q = params.query.lower()
-    hits = [m for m in mem if q in f"{m.get('title','')} {m.get('content','')} {' '.join(m.get('tags',[]))} {m.get('agent_name','')}".lower()]
-    hits.sort(key=lambda m: m.get("timestamp",0), reverse=True); hits = hits[:params.limit]
+    """Search across all memories with local relevance ranking."""
+    mem = _load_mem()
+    ranked = _rank_memory_hits(params.query, mem)
+    hits = ranked[:params.limit]
     if not hits: return f"No results for '{params.query}'."
     lines = [f"# 🔍 '{params.query}' — {len(hits)} results\n"]
-    for m in hits:
+    for score, _, m in hits:
+        pin = "📌 " if m.get("pinned") else ""
         lines.append(f"### [{m['memory_type'].upper()}] {m['title']}")
-        lines.append(f"*✍️ {m['agent_name']}*\n{m['content'][:300]}{'...' if len(m.get('content',''))>300 else ''}\n---\n")
+        lines.append(f"*{pin}score {score} | ✍️ {m['agent_name']} | {m.get('created_at','')}*")
+        lines.append(f"{m['content'][:300]}{'...' if len(m.get('content',''))>300 else ''}")
+        if m.get("tags"):
+            lines.append(f"Tags: {', '.join(m['tags'])}")
+        if m.get("related_files"):
+            lines.append(f"Files: {', '.join(m['related_files'][:5])}")
+        lines.append("---\n")
+    return "\n".join(lines)
+
+@mcp.tool(name="memory_search_vector", annotations={"title":"Vector-style Search Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+async def memory_search_vector(params: VectorSearchInput) -> str:
+    """Optional vector-style search. Disabled by default; JSON remains canonical."""
+    backend = params.backend or VectorBackend(VECTOR_BACKEND if VECTOR_BACKEND in {b.value for b in VectorBackend} else "none")
+    if backend == VectorBackend.NONE:
+        return (
+            "Vector search is disabled.\n\n"
+            "Set `AGENT_MEM_VECTOR_BACKEND=local` or pass `backend='local'` to use the local vector-style backend. "
+            "This does not send data outside the machine and does not replace `.agent-mem/*.json`."
+        )
+
+    mem = _load_mem()
+    hits = _local_vector_search(params.query, mem)[:params.limit]
+    if not hits:
+        return f"No vector-style results for '{params.query}'."
+
+    lines = [f"# 🧭 Vector-style Search: '{params.query}' — {len(hits)} results", f"*Backend: `{backend.value}`*\n"]
+    for score, _, m in hits:
+        pin = "📌 " if m.get("pinned") else ""
+        lines.append(f"### [{m['memory_type'].upper()}] {m['title']}")
+        lines.append(f"*{pin}similarity {score:.3f} | ✍️ {m['agent_name']} | {m.get('created_at','')}*")
+        lines.append(f"{m['content'][:300]}{'...' if len(m.get('content',''))>300 else ''}")
+        if m.get("tags"):
+            lines.append(f"Tags: {', '.join(m['tags'])}")
+        if m.get("related_files"):
+            lines.append(f"Files: {', '.join(m['related_files'][:5])}")
+        lines.append("---\n")
     return "\n".join(lines)
 
 @mcp.tool(name="memory_checkpoint", annotations={"title":"Save Checkpoint","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
@@ -635,17 +843,34 @@ async def memory_handoff(params: HandoffInput) -> str:
 
 @mcp.tool(name="memory_get_briefing", annotations={"title":"Get Full Briefing","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_get_briefing(params: BriefingInput) -> str:
-    """CALL THIS FIRST. Token-aware briefing with tiered memory.
+    """CALL THIS FIRST. Token-aware briefing with workflow modes.
 
     Loads: hot memories (full detail) + warm digests (compressed history).
-    Respects token_budget to avoid bloating the agent's context window.
-    Default 4000 tokens — set lower for cheaper, higher for more detail."""
+    Use mode='brief' for handoff-first catchup, 'normal' for default onboarding,
+    'deep' for broad context, or 'handoff-only' for fast task transfer."""
     prj = _load_prj()
     if not prj: return "No .agent-mem/ found. Run `memory_init`."
     _lazy_kia_sweep()  # clean up idle agents before briefing
     mem = _load_mem(); agents = _load_agt(); state = _load_sta()
     digests = _load_digests()
-    budget = params.token_budget or 4000
+    mode = params.mode or BriefingMode.NORMAL
+    mode_defaults = {
+        BriefingMode.HANDOFF_ONLY: 1500,
+        BriefingMode.BRIEF: 2500,
+        BriefingMode.NORMAL: 4000,
+        BriefingMode.DEEP: 8000,
+    }
+    budget = params.token_budget or mode_defaults.get(mode, 4000)
+    type_caps = dict(BRIEFING_TYPE_CAP)
+    if mode == BriefingMode.BRIEF:
+        type_caps.update({"decision": 6, "warning": 6, "blocker": 6, "discovery": 4, "todo": 6, "file_change": 3, "context": 3, "progress": 2})
+    elif mode == BriefingMode.DEEP:
+        type_caps.update({"discovery": 20, "todo": 20, "file_change": 15, "context": 15, "progress": 10})
+    elif mode == BriefingMode.HANDOFF_ONLY:
+        type_caps = {}
+    include_detail_sections = mode != BriefingMode.HANDOFF_ONLY
+    include_digests = mode in (BriefingMode.NORMAL, BriefingMode.DEEP)
+    include_state = mode in (BriefingMode.NORMAL, BriefingMode.DEEP)
     used = 0
 
     def _add(text):
@@ -659,6 +884,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 
     L = []
     _add(f"# 📋 ON BOARD: {PROJECT_ROOT.name}")
+    _add(f"*Mode: `{mode.value}` | Budget: ~{budget:,} tokens*")
     _add(f"**Description**: {prj.get('description')}\n**Tech**: {prj.get('tech_stack','N/A')}\n**Memories**: {len(mem)} hot + {len(digests)} digests\n")
 
     # Agents — always show
@@ -688,7 +914,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 
     # Pinned — second priority
     pinned = [m for m in mem if m.get("pinned") and m["memory_type"]!=MemoryType.HANDOFF]
-    if pinned:
+    if include_detail_sections and pinned:
         _add("## 📌 Pinned")
         for m in pinned[-8:]:
             max_content = min(300, (budget - used) // 4)
@@ -699,7 +925,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 
     # Latest checkpoint
     cps = [m for m in mem if m["memory_type"]==MemoryType.CHECKPOINT]
-    if cps:
+    if mode != BriefingMode.HANDOFF_ONLY and cps:
         cp = cps[-1]
         _add("## 💾 Latest Checkpoint")
         try:
@@ -722,9 +948,11 @@ async def memory_get_briefing(params: BriefingInput) -> str:
     # Show in priority order: blockers first, then decisions, warnings, etc.
     type_order = ["blocker","decision","warning","discovery","todo","file_change","progress","context"]
     for mtype in type_order:
+        if not include_detail_sections:
+            break
         entries = by_type.get(mtype, [])
         if not entries: continue
-        cap = BRIEFING_TYPE_CAP.get(mtype, 5)
+        cap = type_caps.get(mtype, 5)
         # Sort newest first, take top N
         entries_sorted = sorted(entries, key=lambda m: m.get("timestamp",0), reverse=True)
         capped = entries_sorted[:cap]
@@ -744,7 +972,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
         _add("")
 
     # State — compact
-    if state:
+    if include_state and state:
         _add("## 🔧 State")
         for k,v in state.items():
             if not k.startswith("_"):
@@ -754,7 +982,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
         _add("")
 
     # ── WARM MEMORY: Digests (compressed long-term) ──
-    if digests:
+    if include_digests and digests:
         _add("## 🗜️ Long-term Memory (compressed)")
         for dg in digests[-5:]:
             remaining = budget - used
@@ -769,14 +997,14 @@ async def memory_get_briefing(params: BriefingInput) -> str:
     # Focus area
     if params.focus_area:
         all_searchable = mem + _load_archive()
-        fc = [m for m in all_searchable if params.focus_area.lower() in f"{m.get('title','')} {' '.join(m.get('tags',[]))}".lower()]
+        fc = [m for _, _, m in _rank_memory_hits(params.focus_area, all_searchable)]
         if fc:
             _add(f"## 🎯 Focus: {params.focus_area}")
-            for m in fc[-8:]:
+            for m in fc[:8]:
                 if not _add(f"- [{m['memory_type'].upper()}] {m['title']} (`{m['agent_name']}`)"): break
             _add("")
 
-    if params.include_full_history:
+    if params.include_full_history or mode == BriefingMode.DEEP:
         _add("## 📜 Full History")
         for m in mem:
             if not _add(f"[{m['memory_type'].upper()}] {m['title']} by `{m['agent_name']}`: {m['content'][:200]}\n---"): break
@@ -809,7 +1037,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 
     L += ["## 🚨 GET ON BOARD — MANDATORY PROTOCOL",
           "**STEP 1**: `memory_agent_join(agent_name='your-stable-name', agent_platform='your-platform')` — YOU CANNOT WRITE ANYTHING UNTIL YOU JOIN",
-          "**STEP 2**: `memory_write` after EVERY code change, decision, or discovery — NO EXCEPTIONS",
+          "**STEP 2**: `memory_write` after significant code changes, decisions, discoveries, blockers, or warnings",
           "**STEP 3**: `memory_checkpoint` every 10-15 min — if you die, this is all the next agent has",
           "**STEP 4**: `memory_handoff` before you finish — the next agent depends on this",
           "**STEP 5**: `memory_list_tickets` — check if anyone needs your help",
@@ -832,6 +1060,73 @@ async def memory_status() -> str:
     if mem:
         l = mem[-1]; L.append(f"\n## Last: `{l['agent_name']}` [{l['memory_type']}] {l['title']}")
     return "\n".join(L)
+
+@mcp.tool(name="memory_doctor", annotations={"title":"Doctor Project Setup","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+async def memory_doctor() -> str:
+    """Check project-local On Board setup without changing files."""
+    checks = []
+    required_files = [
+        (MEMORY_DIR, ".agent-mem/ runtime directory", True, False, False),
+        (PROJECT_ROOT / ".agent-mem-hooks" / "cursor-session-start.sh", "Cursor session-start hook", False, True, False),
+        (PROJECT_ROOT / ".agent-mem-hooks" / "cursor-session-end.sh", "Cursor stop hook", False, True, False),
+        (PROJECT_ROOT / ".agent-mem-hooks" / "claude-code-session-start.sh", "Claude Code session-start hook", False, True, False),
+        (PROJECT_ROOT / ".agent-mem-hooks" / "claude-code-stop.sh", "Claude Code stop hook", False, True, False),
+        (PROJECT_ROOT / ".cursor" / "hooks.json", "Cursor hooks config", False, False, True),
+        (PROJECT_ROOT / ".claude" / "settings.json", "Claude Code settings", False, False, True),
+        (PROJECT_ROOT / ".codex" / "hooks.json", "Codex hooks config", False, False, True),
+        (PROJECT_ROOT / ".codex" / "hooks" / "codex-session-start.sh", "Codex session-start hook", False, True, False),
+        (PROJECT_ROOT / ".codex" / "hooks" / "codex-stop.sh", "Codex stop hook", False, True, False),
+        (PROJECT_ROOT / ".agent" / "rules" / "on-board-agent-memory.md", "AntiGravity workspace rule", False, False, False),
+        (PROJECT_ROOT / "AGENTS.md", "Codex rules", False, False, False),
+        (PROJECT_ROOT / "CLAUDE.md", "Claude Code rules", False, False, False),
+        (PROJECT_ROOT / ".cursorrules", "Cursor rules", False, False, False),
+    ]
+
+    for args in required_files:
+        checks.append(_doctor_file(*args))
+    checks.append(_doctor_gitignore())
+
+    prj = _load_prj()
+    mem = _load_mem()
+    agents = _load_agt()
+    tickets = _load_ticket_index()
+    digests = _load_digests()
+
+    failures = [line for status, line in checks if status in ("fail", "missing")]
+    warnings = [line for status, line in checks if status in ("warn", "optional-missing")]
+    ok = [line for status, line in checks if status == "ok"]
+
+    status = "PASS" if not failures else "FAIL"
+    if warnings and not failures:
+        status = "PASS WITH WARNINGS"
+
+    lines = [
+        f"# 🩺 On Board Doctor: {status}",
+        f"`{PROJECT_ROOT}`",
+        "",
+        "## Runtime",
+        f"- Project initialized: {'yes' if prj else 'no'}",
+        f"- Hot memories: {len(mem)}",
+        f"- Digests: {len(digests)}",
+        f"- Agents: {len(agents)}",
+        f"- Tickets: {len(tickets)}",
+        f"- Vector backend: `{VECTOR_BACKEND}`",
+        "",
+        "## Checks",
+    ]
+    lines.extend(ok)
+    lines.extend(warnings)
+    lines.extend(failures)
+
+    lines.append("")
+    lines.append("## Next Step")
+    if failures:
+        lines.append("Run `bash /path/to/agent_mem_MCP/setup-project.sh` from the target project root, then rerun `memory_doctor`.")
+    elif warnings:
+        lines.append("Setup is usable. Review warnings if this client/platform should be active in this project.")
+    else:
+        lines.append("Setup looks complete. Use `memory_get_briefing(mode='brief')` for a quick runtime check.")
+    return "\n".join(lines)
 
 @mcp.tool(name="memory_pin", annotations={"title":"Pin/Unpin","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_pin(params: PinInput) -> str:
@@ -948,6 +1243,7 @@ async def memory_compact(params: CompactInput) -> str:
         f"**Archived**: {len(cold)} entries to archive.json\n\n"
         f"**New digests**:\n" + "\n".join(f"- {t}" for t in new_digest_titles) +
         f"\n\nMethod: {'LLM (Claude)' if (params.use_llm and ANTHROPIC_API_KEY) else 'rule-based'}"
+        f"\n\nNext: run `memory_get_briefing(mode='brief')` to verify the handoff still reads cleanly."
     )
 
 
@@ -965,8 +1261,11 @@ async def memory_token_usage() -> str:
     digest_tokens = sum(_estimate_tokens(d.get("summary", "")) for d in digests)
     archive_tokens = _count_mem_tokens(archive)
 
-    # Estimate briefing output
-    briefing_est = hot_tokens + digest_tokens + 500  # overhead
+    # Estimate briefing output by workflow mode. These are rough upper bounds,
+    # not billing-grade counts.
+    briefing_est = min(hot_tokens + digest_tokens + 500, 4000)
+    brief_est = min(hot_tokens + 500, 2500)
+    deep_est = min(hot_tokens + digest_tokens + 1000, 8000)
 
     hot, cold = _split_hot_cold(mem)
     cold_tokens = _count_mem_tokens(cold)
@@ -982,18 +1281,26 @@ async def memory_token_usage() -> str:
         f"- **Archive**: {len(archive)} entries (~{archive_tokens:,} tokens, on disk only)",
         f"",
         f"## Briefing Cost",
-        f"- Estimated briefing: ~{briefing_est:,} tokens",
-        f"- That's ~{briefing_est/1000:.1f}k of an agent's context window",
+        f"- `memory_get_briefing(mode='brief')`: ~{brief_est:,} tokens",
+        f"- `memory_get_briefing(mode='normal')`: ~{briefing_est:,} tokens",
+        f"- `memory_get_briefing(mode='deep')`: ~{deep_est:,} tokens",
         f"",
     ]
 
-    if cold_tokens > 2000:
+    if cold_tokens > 8000:
         potential_saving = int(cold_tokens * 0.7)  # ~70% savings typical
-        lines.append(f"## 💡 Recommendation")
-        lines.append(f"Run `memory_compact` to save ~{potential_saving:,} tokens ({len(cold)} old entries)")
-        lines.append(f"Or use `memory_prepare_compaction` to review entries before compacting — you can summarize them yourself for better quality at no extra cost.")
+        lines.append(f"## Recommended Workflow")
+        lines.append(f"1. Run `memory_prepare_compaction` to review {len(cold)} compactable entries.")
+        lines.append(f"2. If the preview looks right, run `memory_compact(use_llm=false)`.")
+        lines.append(f"3. Expected saving: ~{potential_saving:,} tokens.")
+    elif cold_tokens > 2000:
+        potential_saving = int(cold_tokens * 0.7)
+        lines.append(f"## Recommended Workflow")
+        lines.append(f"Memory is starting to grow. Run `memory_prepare_compaction` before your next handoff.")
+        lines.append(f"Expected saving if compacted: ~{potential_saving:,} tokens.")
     else:
-        lines.append("✅ Memory is lean — no compaction needed.")
+        lines.append("## Recommended Workflow")
+        lines.append("No compaction needed. Use `memory_get_briefing(mode='brief')` for cheap catchup or `mode='normal'` for regular onboarding.")
 
     return "\n".join(lines)
 
@@ -1031,22 +1338,30 @@ async def memory_prepare_compaction() -> str:
         f"**{len(cold)} cold entries** (~{_count_mem_tokens(cold):,} tokens) ready to compress",
         f"**{len(hot)} hot entries** will be kept as-is",
         f"",
+        f"This is a preview. No files are changed until `memory_compact` runs.",
+        f"",
     ]
 
     for agent_name, entries in by_agent.items():
         tokens = _count_mem_tokens(entries)
-        lines.append(f"## Agent: `{agent_name}` ({len(entries)} entries, ~{tokens:,} tokens)")
+        type_counts = {}
         for e in entries:
+            type_counts[e.get("memory_type", "?")] = type_counts.get(e.get("memory_type", "?"), 0) + 1
+        type_summary = ", ".join(f"{k}:{v}" for k, v in sorted(type_counts.items()))
+        lines.append(f"## Agent: `{agent_name}` ({len(entries)} entries, ~{tokens:,} tokens)")
+        lines.append(f"Types: {type_summary}")
+        for e in entries[:5]:
             pri = "🔴" * e.get("priority", 0) if e.get("priority", 0) > 0 else ""
             lines.append(f"- {pri}[{e['memory_type'].upper()}] **{e['title']}**: {e['content'][:120]}...")
+        if len(entries) > 5:
+            lines.append(f"- ... {len(entries) - 5} more entries hidden from preview")
         lines.append("")
 
     lines.append("---")
-    lines.append("## Next steps")
-    lines.append("1. Read the entries above and write a digest:")
-    lines.append("   `memory_write(memory_type='context', title='Digest: <agent> session', content='<your summary>')`")
-    lines.append("2. Then compact: `memory_compact(use_llm=False)`")
-    lines.append("This saves tokens AND gives better summaries — because you understand the project context.")
+    lines.append("## Recommended Workflow")
+    lines.append("1. If the preview has important nuance, write a short digest with `memory_write(memory_type='context', title='Digest: ...', content='...')`.")
+    lines.append("2. Run `memory_compact(use_llm=false)` to archive the cold raw entries and keep hot memory lean.")
+    lines.append("3. Use `memory_search_archive(query='...')` later if you need the old raw details.")
 
     return "\n".join(lines)
 
@@ -1059,19 +1374,15 @@ async def memory_search_archive(params: SearchInput) -> str:
     if not archive:
         return "Archive is empty. No compacted entries yet."
 
-    q = params.query.lower()
-    hits = [m for m in archive if q in
-            f"{m.get('title','')} {m.get('content','')} {' '.join(m.get('tags',[]))} {m.get('agent_name','')}".lower()]
-    hits.sort(key=lambda m: m.get("timestamp", 0), reverse=True)
-    hits = hits[:params.limit]
+    hits = _rank_memory_hits(params.query, archive)[:params.limit]
 
     if not hits:
         return f"No archived entries matching '{params.query}'."
 
     lines = [f"# 🗄️ Archive Search: '{params.query}' ({len(hits)} results)\n"]
-    for m in hits:
+    for score, _, m in hits:
         lines.append(f"### [{m['memory_type'].upper()}] {m['title']}")
-        lines.append(f"*✍️ {m['agent_name']} | {m['created_at']}*")
+        lines.append(f"*score {score} | ✍️ {m['agent_name']} | {m['created_at']}*")
         lines.append(f"{m['content'][:400]}{'...' if len(m.get('content',''))>400 else ''}\n---\n")
     return "\n".join(lines)
 

@@ -108,6 +108,8 @@ your-project/
 
 If an existing config file is present, the installer leaves it alone and prints the template path to merge manually.
 
+After installing, run `memory_doctor` from your MCP client to check project-local hooks, rules, runtime memory, and ignored paths.
+
 ## Agent Workflow
 
 First time in a new project:
@@ -126,13 +128,20 @@ memory_bootstrap(agent_name="claude-onboard", description="My project", tech_sta
 Every later agent:
 
 ```text
-memory_get_briefing()
+memory_get_briefing(mode="normal")
 memory_agent_join(agent_name="codex-main", agent_platform="codex")
 memory_list_tickets()
 memory_write(...)
 memory_checkpoint(...)
 memory_handoff(...)
 ```
+
+Briefing modes:
+
+- `brief` - fast catchup with the latest handoff and highest-signal memory
+- `normal` - default onboarding
+- `deep` - broader project history when context is unclear
+- `handoff-only` - fastest transfer check
 
 Use stable agent names such as `claude-main`, `cursor-coder`, or `codex-main`. Keep the same name across sessions; do not put dates, model names, or session IDs in `agent_name`.
 
@@ -150,19 +159,21 @@ Use tickets when work needs to move between agents:
 
 ## Tools
 
-On Board currently exposes 25 MCP tools.
+On Board currently exposes 27 MCP tools.
 
 Core:
-`memory_init`, `memory_bootstrap`, `memory_agent_join`, `memory_get_briefing`, `memory_status`, `memory_handoff`
+`memory_init`, `memory_bootstrap`, `memory_agent_join`, `memory_get_briefing`, `memory_status`, `memory_doctor`, `memory_handoff`
 
 Memory:
-`memory_write`, `memory_read`, `memory_search`, `memory_pin`
+`memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_pin`
 
 State and context:
 `memory_checkpoint`, `memory_update_state`, `memory_context_dirs`, `memory_context_read`
 
 Compaction:
 `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive`
+
+Recommended compaction flow: run `memory_token_usage`, review old entries with `memory_prepare_compaction`, then run `memory_compact(use_llm=false)` when the preview looks safe.
 
 Tickets:
 `memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets`
@@ -192,6 +203,7 @@ Tickets:
 | `AGENT_MEM_HOT_HOURS` | 24 | Hours to keep full-detail hot memory |
 | `AGENT_MEM_MAX_HOT` | 50 | Max hot memory entries |
 | `AGENT_MEM_IDLE_KIA_MIN` | 30 | Minutes before idle active agents are marked KIA |
+| `AGENT_MEM_VECTOR_BACKEND` | none | Optional vector-style search backend: `none` or `local` |
 
 ## Updating
 
