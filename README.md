@@ -32,11 +32,16 @@ Use `uv run --directory` in MCP configs so the server always runs from this chec
     "agent-memory": {
       "command": "uv",
       "args": ["run", "--directory", "/full/path/to/On_Board", "python", "server.py"],
-      "env": { "AGENT_PROJECT_DIR": "/full/path/to/your/project" }
+      "env": {
+        "AGENT_PROJECT_DIR": "/full/path/to/your/project",
+        "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
+      }
     }
   }
 }
 ```
+
+`AGENT_MEM_CONTEXT_DIRS` is optional. Set it when agents should browse external reference folders with `memory_context_dirs` and `memory_context_read`; remove it if the project memory should stay self-contained.
 
 This repo documents `uv run` for now, not `uvx`. `uvx` is better after On Board has a published package entrypoint/console script; until then, `uv run --directory` is the reliable checkout-based path.
 

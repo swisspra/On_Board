@@ -57,10 +57,10 @@ def test_release_materials_match_current_version():
     first_header = next(line for line in changelog.splitlines() if line.startswith("## v"))
     release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
 
-    assert re.search(r'^version = "3\.5\.1"$', pyproject, re.MULTILINE)
-    assert first_header.startswith("## v3.5.1")
-    assert "uv Setup Templates" in first_header
-    for expected in ["uv sync", "uv run", "configs/uv-mcp.json", "uv.lock", "console script"]:
+    assert re.search(r'^version = "3\.5\.2"$', pyproject, re.MULTILINE)
+    assert first_header.startswith("## v3.5.2")
+    assert "Context Dir Template" in first_header
+    for expected in ["uv run", "configs/uv-mcp.json", "AGENT_MEM_CONTEXT_DIRS", "context directories"]:
         assert expected in release_notes
 
 
@@ -75,3 +75,5 @@ def test_uv_install_docs_and_template_are_present():
     assert '"--directory"' in template
     assert '"python"' in template
     assert '"server.py"' in template
+    assert "AGENT_MEM_CONTEXT_DIRS" in readme
+    assert '"AGENT_MEM_CONTEXT_DIRS"' in template

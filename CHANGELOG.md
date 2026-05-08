@@ -1,5 +1,15 @@
 # Changelog
 
+## v3.5.2 — Context Dir Template (2026-05-09)
+
+**Small template fix for projects that use external reference directories.**
+
+### Changed
+- Added `AGENT_MEM_CONTEXT_DIRS` to the `uv run --directory` MCP config template
+- Clarified that context directories are optional and exposed through `memory_context_dirs` / `memory_context_read`
+
+---
+
 ## v3.5.1 — uv Setup Templates (2026-05-09)
 
 **A small install-path release for running On Board from a source checkout with `uv`.**
