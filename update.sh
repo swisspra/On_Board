@@ -22,8 +22,25 @@ if [ -d ".git" ]; then
     echo ""
 fi
 
-# ── Step 2: Reinstall venv (if exists here) ──
-if [ -d "venv" ]; then
+# ── Step 2: Sync local environment ──
+SYNCED=0
+if command -v uv >/dev/null 2>&1; then
+    echo "📦 Syncing uv environment..."
+    if uv sync -q 2>/dev/null; then
+        TOOLS=$(uv run python -c "
+import sys; sys.path.insert(0, '.')
+from server import mcp
+print(len(mcp._tool_manager._tools))
+" 2>/dev/null || echo "?")
+        echo "   ✅ uv synced ($TOOLS tools)"
+        SYNCED=1
+    else
+        echo "   ⚠️ uv sync failed"
+    fi
+    echo ""
+fi
+
+if [ "$SYNCED" -eq 0 ] && [ -d "venv" ]; then
     echo "📦 Updating local venv..."
     ./venv/bin/pip install -q httpx "mcp[cli]" pydantic 2>/dev/null
     TOOLS=$(./venv/bin/python -c "
@@ -94,21 +111,36 @@ for DEST in "${TARGETS[@]}"; do
 
     cp "$SCRIPT_DIR/server.py" "$DEST/server.py"
     cp "$SCRIPT_DIR/pyproject.toml" "$DEST/pyproject.toml"
+    [ -f "$SCRIPT_DIR/uv.lock" ] && cp "$SCRIPT_DIR/uv.lock" "$DEST/uv.lock"
     [ -f "$SCRIPT_DIR/dashboard_live.py" ] && cp "$SCRIPT_DIR/dashboard_live.py" "$DEST/dashboard_live.py"
     [ -f "$SCRIPT_DIR/SKILL.md" ] && cp "$SCRIPT_DIR/SKILL.md" "$DEST/SKILL.md"
 
     [ -d "$SCRIPT_DIR/hooks" ] && mkdir -p "$DEST/hooks" && cp "$SCRIPT_DIR/hooks/"*.sh "$DEST/hooks/" 2>/dev/null && chmod +x "$DEST/hooks/"*.sh 2>/dev/null
     [ -d "$SCRIPT_DIR/configs" ] && mkdir -p "$DEST/configs" && cp "$SCRIPT_DIR/configs/"* "$DEST/configs/" 2>/dev/null
 
-    if [ -f "$DEST/venv/bin/pip" ]; then
+    DEPLOY_SYNCED=0
+    if command -v uv >/dev/null 2>&1; then
+        if (cd "$DEST" && uv sync -q) 2>/dev/null; then
+            DEPLOY_SYNCED=1
+        fi
+    fi
+
+    if [ "$DEPLOY_SYNCED" -eq 0 ] && [ -f "$DEST/venv/bin/pip" ]; then
         "$DEST/venv/bin/pip" install -q httpx "mcp[cli]" pydantic 2>/dev/null
     fi
 
     TOOLS="?"
-    [ -f "$DEST/venv/bin/python" ] && TOOLS=$("$DEST/venv/bin/python" -c "
+    if [ "$DEPLOY_SYNCED" -eq 1 ]; then
+        TOOLS=$(cd "$DEST" && uv run python -c "
+import sys; sys.path.insert(0, '.')
+from server import mcp; print(len(mcp._tool_manager._tools))
+" 2>/dev/null || echo "?")
+    elif [ -f "$DEST/venv/bin/python" ]; then
+        TOOLS=$("$DEST/venv/bin/python" -c "
 import sys; sys.path.insert(0, '$DEST')
 from server import mcp; print(len(mcp._tool_manager._tools))
 " 2>/dev/null || echo "?")
+    fi
 
     echo "   ✅ Updated ($TOOLS tools)"
 done
