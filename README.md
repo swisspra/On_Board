@@ -276,4 +276,4 @@ With an existing venv:
 
 ## License
 
-MIT
+Apache-2.0
