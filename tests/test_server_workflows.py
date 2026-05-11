@@ -99,6 +99,40 @@ def test_ticket_scoped_briefing_shows_ticket_details_and_related_memory(tmp_path
     assert "Ticket TK-abc implementation decision" in output
 
 
+def test_briefing_and_status_limit_agent_history_to_latest_ten(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    now = time.time()
+    server._save_agt({
+        f"a{i:02d}": {
+            "agent_name": f"agent-{i:02d}",
+            "agent_platform": "codex",
+            "status": "kia",
+            "memories_written": i,
+            "last_activity": now + i,
+        }
+        for i in range(12)
+    })
+    server._save_mem([])
+
+    briefing = asyncio.run(server.memory_get_briefing(server.BriefingInput(mode="brief", token_budget=8000)))
+    status = asyncio.run(server.memory_status())
+
+    assert "Agent History (latest 10 of 12)" in briefing
+    assert briefing.count("**agent-") == 10
+    assert "agent-11" in briefing
+    assert "agent-02" in briefing
+    assert "agent-01" not in briefing
+    assert "agent-00" not in briefing
+
+    assert "Agents (latest 10 of 12)" in status
+    assert status.count("**agent-") == 10
+    assert "agent-11" in status
+    assert "agent-02" in status
+    assert "agent-01" not in status
+    assert "agent-00" not in status
+
+
 def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     server = load_server(tmp_path)
     seed_project(server)

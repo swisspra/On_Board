@@ -46,6 +46,7 @@ VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()
 # Idle detection: agents with no heartbeat for this long get auto-KIA'd
 IDLE_KIA_MIN = int(os.environ.get("AGENT_MEM_IDLE_KIA_MIN", "30"))
 IDLE_WARN_MIN = IDLE_KIA_MIN // 2  # warn at half the KIA threshold
+AGENT_HISTORY_LIMIT = 10
 
 # Briefing type caps — how many entries of each type to include in briefings.
 # High-signal types get unlimited. Spam-prone types get capped hard.
@@ -68,6 +69,28 @@ CONTEXT_DIRS = [
     Path(p.strip()) for p in os.environ.get("AGENT_MEM_CONTEXT_DIRS", "").split(":")
     if p.strip()
 ]
+
+def _agent_activity_ts(agent: dict) -> float:
+    for key in ("last_activity", "timestamp"):
+        value = agent.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                pass
+    for key in ("joined_at", "handed_off_at", "completed_at", "kia_at"):
+        value = agent.get(key)
+        if value:
+            try:
+                return datetime.fromisoformat(str(value)).timestamp()
+            except ValueError:
+                pass
+    return 0.0
+
+def _recent_agent_items(agents: dict, limit: int = AGENT_HISTORY_LIMIT) -> list:
+    return sorted(agents.items(), key=lambda item: _agent_activity_ts(item[1]), reverse=True)[:limit]
 
 # ── MCP Server ──────────────────────────────────────────
 mcp = FastMCP("onboard_memory_mcp")
@@ -826,11 +849,11 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
         for k,v in active_others.items():
             lines.append(f"  🟢 `{v['agent_name']}` ({v['agent_platform']})")
         lines.append("")
-    # Show recent agents (last 5 non-active, for context)
+    # Show recent agents (bounded for context)
     prev = sorted(
         [(k,v) for k,v in agents.items() if k != aid and v.get("status") != AgentStatus.ACTIVE],
         key=lambda x: x[1].get("last_activity", 0), reverse=True
-    )[:5]
+    )[:AGENT_HISTORY_LIMIT]
     if prev:
         lines.append("📜 **Recent agents**:")
         for k,v in prev:
@@ -1215,9 +1238,13 @@ async def memory_get_briefing(params: BriefingInput) -> str:
     _add(f"*Mode: `{mode.value}` | Budget: ~{budget:,} tokens*")
     _add(f"**Description**: {prj.get('description')}\n**Tech**: {prj.get('tech_stack','N/A')}\n**Memories**: {len(mem)} hot + {len(digests)} digests\n")
 
-    # Agents — always show
-    _add("## 👥 Agent History")
-    for aid,a in agents.items():
+    # Agents — always show, but keep briefing output bounded.
+    agent_items = _recent_agent_items(agents)
+    agent_heading = "## 👥 Agent History"
+    if len(agents) > AGENT_HISTORY_LIMIT:
+        agent_heading += f" (latest {AGENT_HISTORY_LIMIT} of {len(agents)})"
+    _add(agent_heading)
+    for aid,a in agent_items:
         e = {"active":"🟢","kia":"💀","completed":"✅","handed_off":"🤝"}.get(a.get("status",""),"❓")
         role = a.get("agent_role", "main")
         role_tag = f" [{role}]" if role != "main" else ""
@@ -1406,8 +1433,11 @@ async def memory_status() -> str:
     mem = _load_mem(); agents = _load_agt()
     tc = {}
     for m in mem: tc[m.get("memory_type","?")] = tc.get(m.get("memory_type","?"),0)+1
-    L = [f"# 📊 {PROJECT_ROOT.name}", f"`{MEMORY_DIR}`", f"Total: {len(mem)} memories\n## Agents"]
-    for a in agents.values():
+    agent_heading = "## Agents"
+    if len(agents) > AGENT_HISTORY_LIMIT:
+        agent_heading += f" (latest {AGENT_HISTORY_LIMIT} of {len(agents)})"
+    L = [f"# 📊 {PROJECT_ROOT.name}", f"`{MEMORY_DIR}`", f"Total: {len(mem)} memories\n{agent_heading}"]
+    for _,a in _recent_agent_items(agents):
         e = {"active":"🟢","kia":"💀","completed":"✅","handed_off":"🤝"}.get(a.get("status",""),"❓")
         L.append(f"- {e} **{a['agent_name']}** ({a['agent_platform']}) — {a.get('memories_written',0)} writes")
     L.append("\n## Types")
