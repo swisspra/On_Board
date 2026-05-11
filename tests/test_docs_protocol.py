@@ -27,6 +27,7 @@ def test_rules_and_hooks_wrap_protocol_in_xml_tags():
     files = [
         "SKILL.md",
         "setup-project.sh",
+        "templates/agent-rules.md",
         "hooks/cursor-session-start.sh",
         "hooks/claude-code-session-start.sh",
         "hooks/codex-session-start.sh",
@@ -35,6 +36,18 @@ def test_rules_and_hooks_wrap_protocol_in_xml_tags():
         text = (REPO_ROOT / path).read_text(encoding="utf-8")
         assert "<on_board_protocol>" in text, path
         assert "<required_first_call>memory_onboard</required_first_call>" in text, path
+
+
+def test_setup_uses_shared_agent_rules_template():
+    setup = (REPO_ROOT / "setup-project.sh").read_text(encoding="utf-8")
+    template = (REPO_ROOT / "templates/agent-rules.md").read_text(encoding="utf-8")
+
+    assert "templates/agent-rules.md" in setup
+    assert "RULES_NOTE=\"$(cat \"$RULES_TEMPLATE\")\"" in setup
+    assert "Re-join after every off-board action" in template
+    assert "memory_submit_ticket" in template
+    assert "Cloudflare Pages" not in template
+    assert "netlea" not in template.lower()
 
 
 def test_start_hooks_point_agents_to_memory_onboard():

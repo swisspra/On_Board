@@ -100,8 +100,11 @@ else
 fi
 
 # ── 5. Create CLAUDE.md / .cursorrules / AGENTS.md reminder ──
-RULES_NOTE="
-# On Board — Agent Shared Memory Protocol
+RULES_TEMPLATE="$SCRIPT_DIR/templates/agent-rules.md"
+if [ -f "$RULES_TEMPLATE" ]; then
+    RULES_NOTE="$(cat "$RULES_TEMPLATE")"
+else
+    RULES_NOTE="# On Board — Agent Shared Memory Protocol
 
 This project uses .agent-mem/ for multi-agent coordination.
 
@@ -113,38 +116,30 @@ This project uses .agent-mem/ for multi-agent coordination.
   <handoff_policy>Always handoff before leaving.</handoff_policy>
 </on_board_protocol>
 
-Get On Board before starting ANY work:
+Get On Board before starting any work:
 1. Call memory_onboard with your stable agent_name and platform
 2. Call memory_write after every significant action
 3. Call memory_checkpoint every 10-15 minutes
 4. Call memory_handoff before you finish
 
 If memory_onboard is not available, call memory_get_briefing first, then memory_agent_join.
-
-When coordinating work between agents:
-- Use memory_create_ticket to request help and assign it to a specific agent or platform when needed
-- Use memory_claim_ticket to pick up work that was assigned to you
-- Use memory_submit_ticket when your implementation is ready for review
-- Use memory_review_ticket to approve work or send it back with concrete fix instructions
-
-If you skip these steps, the next agent will have no context and will redo your work.
-Your agent_name is stamped on every entry, so write updates another agent can rely on.
 "
+fi
 
 if [ ! -f "$PROJECT_DIR/CLAUDE.md" ]; then
-    echo "$RULES_NOTE" > "$PROJECT_DIR/CLAUDE.md"
+    printf "%s\n" "$RULES_NOTE" > "$PROJECT_DIR/CLAUDE.md"
     echo "✅ Created CLAUDE.md with agent memory protocol"
 fi
 
 if [ ! -f "$PROJECT_DIR/.cursorrules" ]; then
-    echo "$RULES_NOTE" > "$PROJECT_DIR/.cursorrules"
+    printf "%s\n" "$RULES_NOTE" > "$PROJECT_DIR/.cursorrules"
     echo "✅ Created .cursorrules with agent memory protocol"
 fi
 
 if [ -f "$PROJECT_DIR/AGENTS.md" ]; then
     echo "⚠️  AGENTS.md exists — please merge Codex instructions manually"
 else
-    echo "$RULES_NOTE" > "$PROJECT_DIR/AGENTS.md"
+    printf "%s\n" "$RULES_NOTE" > "$PROJECT_DIR/AGENTS.md"
     echo "✅ Created AGENTS.md with agent memory protocol"
 fi
 
@@ -155,7 +150,7 @@ mkdir -p "$ANTIGRAVITY_RULES_DIR"
 if [ -f "$ANTIGRAVITY_RULE_FILE" ]; then
     echo "⚠️  .agent/rules/on-board-agent-memory.md exists — please merge AntiGravity rules manually"
 else
-    echo "$RULES_NOTE" > "$ANTIGRAVITY_RULE_FILE"
+    printf "%s\n" "$RULES_NOTE" > "$ANTIGRAVITY_RULE_FILE"
     echo "✅ Created .agent/rules/on-board-agent-memory.md for AntiGravity"
 fi
 
