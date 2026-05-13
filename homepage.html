@@ -1,0 +1,1126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OnBoard — The shared brain for a multi-agent dev team</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: #111a2e;
+    --panel2: #0e1626;
+    --line: #1f2c47;
+    --text: #e6edf7;
+    --muted: #8ea0c2;
+    --accent: #6ee7b7;
+    --accent2: #60a5fa;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --good: #34d399;
+    --code: #1c2740;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    line-height: 1.55; }
+  body { scroll-behavior: smooth; }
+  .deck { max-width: 1100px; margin: 0 auto; padding: 0 28px; }
+  section.slide {
+    min-height: 100vh; padding: 80px 0 60px;
+    border-bottom: 1px solid var(--line);
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  h1 { font-size: clamp(40px, 6vw, 78px); line-height: 1.04; letter-spacing: -0.02em; margin: 0 0 24px; }
+  h2 { font-size: clamp(30px, 4.4vw, 52px); line-height: 1.1; letter-spacing: -0.01em; margin: 0 0 24px; }
+  h3 { font-size: 22px; margin: 0 0 12px; color: var(--text); }
+  p { font-size: 18px; color: var(--muted); margin: 0 0 14px; }
+  p.lede { font-size: 22px; color: var(--text); }
+  .accent { color: var(--accent); }
+  .accent2 { color: var(--accent2); }
+  .warn { color: var(--warn); }
+  .good { color: var(--good); }
+  .bad { color: var(--bad); }
+  .muted { color: var(--muted); }
+  .pill { display: inline-block; padding: 4px 10px; font-size: 12px; font-weight: 600;
+    border-radius: 999px; background: var(--panel); color: var(--muted);
+    border: 1px solid var(--line); letter-spacing: 0.04em; }
+  .pill.live { color: var(--good); border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.08); }
+  .grid { display: grid; gap: 18px; }
+  .grid-2 { grid-template-columns: 1fr 1fr; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 760px) {
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+  .card.tight { padding: 18px; }
+  .card h3 { font-size: 17px; }
+  .card p { font-size: 15px; margin: 0; }
+  .stat { background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+    border: 1px solid var(--line); border-radius: 16px; padding: 26px; }
+  .stat .num { font-size: 56px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; margin: 0 0 8px; }
+  .stat .num.small { font-size: 38px; }
+  .stat .label { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+  .stat .sub { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  code { font-family: "SF Mono", ui-monospace, "Roboto Mono", Consolas, monospace;
+    background: var(--code); color: var(--accent); padding: 2px 7px; border-radius: 5px; font-size: 0.92em; }
+  pre { background: var(--code); border: 1px solid var(--line); padding: 14px 16px;
+    border-radius: 10px; overflow-x: auto; font-size: 14px; }
+  pre code { background: transparent; padding: 0; color: var(--text); }
+  ul { padding-left: 22px; margin: 0 0 14px; }
+  ul li { color: var(--muted); margin-bottom: 6px; font-size: 16px; }
+  ul li strong { color: var(--text); }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 28px 0; }
+  .nav { position: fixed; top: 14px; right: 14px; z-index: 50;
+    background: rgba(11,18,32,0.85); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 6px 14px; font-size: 12px; color: var(--muted); }
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before {
+    content: ""; position: absolute; left: 6px; top: 8px; bottom: 8px; width: 2px;
+    background: linear-gradient(180deg, var(--accent2), var(--accent));
+  }
+  .tl-item { position: relative; padding: 10px 0 18px; border-bottom: 1px dashed var(--line); }
+  .tl-item:last-child { border-bottom: 0; }
+  .tl-item::before {
+    content: ""; position: absolute; left: -28px; top: 16px; width: 14px; height: 14px;
+    border-radius: 50%; background: var(--accent); border: 3px solid var(--bg);
+  }
+  .loop-row {
+    display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap;
+    background: var(--panel2); border: 1px dashed var(--line); border-radius: 12px;
+    padding: 18px; margin: 0 0 14px;
+  }
+  .loop-step { flex: 1 1 130px; min-width: 130px; }
+  .loop-step .who { font-size: 13px; color: var(--accent); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+  .loop-step .what { font-size: 15px; color: var(--text); margin-top: 4px; }
+  .loop-arrow { display: flex; align-items: center; color: var(--muted); font-size: 22px; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { color: var(--text); }
+  td.muted { color: var(--muted); }
+  .bar { display: flex; height: 28px; border-radius: 6px; overflow: hidden; background: var(--panel2); border: 1px solid var(--line); }
+  .bar .seg { display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #08111e; }
+  .bar .seg.active { background: var(--accent); }
+  .bar .seg.idle { background: var(--panel); color: var(--muted); }
+  .price-tag { display: inline-block; padding: 6px 14px; border-radius: 999px;
+    background: rgba(110, 231, 183, 0.1); border: 1px solid rgba(110, 231, 183, 0.4);
+    color: var(--accent); font-weight: 700; font-size: 14px; }
+  .footer { padding: 40px 0 80px; color: var(--muted); font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="nav">v6 · 2026-05-12</div>
+
+<!-- SLIDE 1 — HOOK -->
+<section class="slide" id="hook">
+  <div class="deck">
+    <span class="pill live">● LIVE in production</span>
+    <h1 style="margin-top:22px;">
+      We shipped a real SaaS in 11 active hours.<br>
+      <span class="accent">Without typing a line of code.</span>
+    </h1>
+    <p class="lede">
+      Three Claude accounts and one Antigravity seat did the coding.
+      Human as the PM (orchestrator) and the final tester — not the developer or line-by-line
+      code reviewer.
+      Total stack cost: <strong class="accent">$80 a month.</strong>
+    </p>
+    <p style="margin-top:24px;"> 2026-05-12 · Swiss P. · <a href="https://github.com/swisspra/On_Board" style="color:var(--accent2);">github.com/swisspra/On_Board</a></p>
+  </div>
+</section>
+
+<!-- SLIDE 2 — THE PROBLEM -->
+<section class="slide" id="problem">
+  <div class="deck">
+    <span class="pill">THE PROBLEM</span>
+    <h2 style="margin-top:18px;">
+      Today's AI coding tools are <span class="accent">turbo autocomplete</span>, not a team.
+    </h2>
+    <div class="grid grid-2" style="margin-top:30px;">
+      <div class="card">
+        <h3>One agent at a time</h3>
+        <p>You drive. The AI types faster. When you close the chat, the work stops and the context evaporates.</p>
+      </div>
+      <div class="card">
+        <h3>No memory between sessions</h3>
+        <p>Every new chat is amnesia. You re-explain the codebase, the conventions, the bug you fixed last Tuesday.</p>
+      </div>
+      <div class="card">
+        <h3>No second pair of eyes</h3>
+        <p>The model that wrote the code also "reviews" it. No specs, no acceptance test, no independent QA.</p>
+      </div>
+      <div class="card">
+        <h3>One platform's quota</h3>
+        <p>Claude throttled? You wait. Cursor stalled? You wait. Each tool is a silo with its own ceiling.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 3 — THE IDEA -->
+<section class="slide" id="idea">
+  <div class="deck">
+    <span class="pill">THE IDEA</span>
+    <h2 style="margin-top:18px;">
+      Treat AI agents like <span class="accent">a real engineering team.</span>
+    </h2>
+    <p class="lede" style="margin-top:6px;">
+      Roles. Tickets. Parallel tracks. Code review. Persistent memory.
+      And quality gates the human controls.
+    </p>
+    <div class="grid grid-3" style="margin-top:30px;">
+      <div class="card">
+        <h3>📋 Role-based personas</h3>
+        <p>Dev tracks own different modules in parallel. QA agents test independently. PM agents review. Each has its own working memory.</p>
+      </div>
+      <div class="card">
+        <h3>🎫 Tickets, not chats</h3>
+        <p>Work flows through a queue: <code>open → claimed → in_progress → submitted → reviewed → closed</code>. Evidence attached at every step.</p>
+      </div>
+      <div class="card">
+        <h3>🧠 Persistent memory</h3>
+        <p>Decisions, bug findings, conventions, all written to disk. New agents read a briefing and pick up exactly where the last one left off.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 4 — THE LOOP -->
+<section class="slide" id="loop">
+  <div class="deck">
+    <span class="pill">WHAT EVERY OTHER TOOL IS MISSING</span>
+    <h2 style="margin-top:18px;">
+      <span class="accent">Dev-Tester (Autonomous).</span>
+    </h2>
+    <p class="lede">
+      Every AI coding tool gives you a coder. OnBoard gives you tester — a
+      "independent" agent that run the actual UI in a real browser, captures
+      screenshots, record every click, and submits PASS or FAIL with evidence.
+    </p>
+    <p>The dev agent never reviews its own work. Rejected tickets come back
+       with concrete fix instructions, not death. The loop:</p>
+
+    <div class="loop-row" style="margin-top:18px;">
+      <div class="loop-step">
+        <div class="who">1. SPEC</div>
+        <div class="what">3 Developer agents create tickets and functional test cases from their own code.</div>
+      </div>
+      <div class="loop-arrow">→</div>
+      <div class="loop-step">
+        <div class="who">2. TEST</div>
+        <div class="what">Jonhny1-tester claims, runs UI in browser, screenshots, VDOs,logs, DOMs, PASS/FAIL.</div>
+      </div>
+      <div class="loop-arrow">→</div>
+      <div class="loop-step">
+        <div class="who">3. REVIEW</div>
+        <div class="what">desktop-reviewer-opus4.7 approves(closed) OR rejects(ticket queue) with fix notes.</div>
+      </div>
+      <div class="loop-arrow">→</div>
+      <div class="loop-step">
+        <div class="who">4. Fix</div>
+        <div class="what">dev-track-N claims, fixs, submits back to tester</div>
+      </div>
+      <div class="loop-arrow">→</div>
+      <div class="loop-step">
+        <div class="who">4. TEST</div>
+        <div class="what">Jonhny4-tester claims, runs test, submits back to reviewer.</div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:14px;">Once approved, the ticket closes itself. If rejected, the ticket state rolls back to open with fix instructions attached — the dev patches,
+     the tester re-validates, the reviewer signs off, and the loop repeats. <strong class="good">
+    Across all dev-submitted test cases, this cycle triggered 16 times — catching 16 bugs before they shipped.</strong>
+       Without it, 16 bugs would have shipped.</p>
+       <p class="muted" style="font-size:16px;"> A rejected ticket may be returned to the tester if the submitted test results are incorrect or do not meet acceptance criteria.</p>
+       <p class="muted" style="font-size:16px;"> yes it 'jonhny' not 'johnny' :P </p>
+  </div>
+</section>
+
+
+<!-- SLIDE 4.1 — QA -->
+<section class="slide" id="loopQA">
+  <div class="deck">
+    <span class="pill">ONE STEP FURTHER</span>
+    <h2 style="margin-top:18px;">
+      <span class="accent">QA (Blind. Parallel. Autonomous.).</span>
+    </h2>
+    <p class="lede">
+      OnBoard doesn't stop at one tester. A dedicated spec agent writes 100+ acceptance
+      tests from the design spec alone — before the implement start. Multiple Gemini tester agents
+      run simultaneously on a different platform, also with some brief about project provided when join the session.
+      Completely independent. Completely autonomous.
+    </p>
+    <p>Same loop as before. Different scale — and a much higher bar for "done."</p>
+
+    <div class="loop-row" style="margin-top:18px;">
+      <div class="loop-step">
+        <div class="who">1. SPEC</div>
+        <div class="what">opus-testcase reads the design spec and writes 100+ acceptance test cases — never sees the code.</div>
+      </div>
+      <div class="loop-step">
+ 	    <div class="who">2. SPLIT</div>
+        <div class="what">A planner agent breaks the finalized design into 3 independent tracks — each assigned to a dev-track agent running in parallel locally.</div>
+	</div>
+	<div class="loop-arrow">→</div>
+	<div class="loop-step">
+ 	 <div class="who">3. BUILD</div>
+  	<div class="what">dev-track-1, 2, 3 each claim their track, implement, and submit with a file diff.</div>
+	</div>
+      <div class="loop-arrow">→</div>
+      <div class="loop-step">
+        <div class="who">3. TEST</div>
+        <div class="what">2–3 Jonhny-tester (Gemini) agents run in parallel on Antigravity — no code, no design access — each submitting independent PASS or FAIL with evidence.</div>
+      </div>
+      <div class="loop-arrow">→</div>
+      <div class="loop-step">
+        <div class="who">4. REVIEW</div>
+        <div class="what">desktop-opus4.7 approves (ticket closes) or rejects (ticket reopens with fix notes).</div>
+      </div>
+    </div>
+    <p class="muted" style="font-size:14px;">
+      The same loop — but now the people writing the tests and running them
+      have never seen the code. That's not a workflow. That's an audit.
+    </p>
+  </div>
+</section>
+
+
+<!-- SLIDE 4.3 — TICKETS FOR ANY EXPENSIVE TASK -->
+<section class="slide" id="arbitrage">
+  <div class="deck">
+    <span class="pill">THE FEATURE EVERYONE MISSES</span>
+    <h2 style="margin-top:18px;">
+      Tickets aren't just for QA. <span class="accent">They're for any expensive task.</span>
+    </h2>
+    <p class="lede">
+      Most "multi-agent" demos pick a model per role and stick with it.
+      OnBoard does something more useful: <strong class="accent">tickets
+      route work to the cheapest agent that can do it</strong>.
+    </p>
+
+    <div class="card" style="margin-top:24px;">
+      <h3>The operator's working rule</h3>
+      <pre style="margin-top:10px;"><code>If you (heavy Opus-class agent) think a task will consume
+a lot of tokens or quota but isn't complicated,
+PAUSE and ask the user before doing it.
+We'll file a ticket for a cheaper agent instead.</code></pre>
+      <p style="margin-top:12px;">Opus identifies the work. Human approves the delegation. A ticket is filed with the spec, target, and required outputs. <strong class="accent">A cheaper agent (Sonnet, Haiku, Gemini Flash) picks it up</strong> via the same <code>claim → submit → review</code> loop the QA tickets use.</p>
+    </div>
+
+    <div class="grid grid-3" style="margin-top:24px;">
+      <div class="card">
+        <h3 class="accent">Reasoning-heavy</h3>
+        <p>Architecture decisions, debug-the-unknown-cause, multi-file refactors → Opus stays on it</p>
+      </div>
+      <div class="card">
+        <h3 class="accent2">Token-heavy, not hard</h3>
+        <p>Batch renames, log triage, repeated test setup, doc cleanup, file shuffles → <strong>ticket → cheaper agent</strong></p>
+      </div>
+      <div class="card">
+        <h3 class="good">Execution-only</h3>
+        <p>UI test runs, screenshot capture, evidence collection → QA squad on Antigravity (24/7, $20/mo)</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px; background:rgba(96, 165, 250, 0.06); border-color:rgba(96, 165, 250, 0.3);">
+      <p style="color:var(--text);"><strong class="accent2">The killer insight:</strong> the loop turns <strong>multi-model cost arbitrage into a workflow primitive</strong>. You stop thinking "should I switch models for this?" mid-task. Opus thinks it, the loop routes it, the cheaper agent picks it up. The same primitive that runs QA also runs cost optimization.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 4.5 — AUDIT TRAIL -->
+<section class="slide" id="audit">
+  <div class="deck">
+    <span class="pill">THE AUDIT TRAIL</span>
+    <h2 style="margin-top:18px;">
+      Auditable down to <span class="accent">the network log.</span>
+    </h2>
+    <p class="lede">
+      Every test the QA agent runs captures the full evidence stack —
+      video, screenshots, DOM snapshots, console logs, network logs,
+      and the verdict. Across the case study's 100+ test cases:
+      <strong class="accent">~17 GB of evidence per project.</strong>
+    </p>
+
+    <div class="grid grid-3" style="margin-top:30px;">
+      <div class="stat">
+        <div class="num accent">~14<span style="font-size:24px; color:var(--muted);"> GB</span></div>
+        <div class="label">Audit evidence / project</div>
+        <div class="sub">Per-test bundle: video + screenshots + DOM + console + network + result</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">100+</div>
+        <div class="label">Test cases captured</div>
+        <div class="sub">Every test produces an evidence bundle linked to a ticket</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">24/7</div>
+        <div class="label">QA agent uptime</div>
+        <div class="sub">Antigravity $20/mo tier runs the tester effectively unlimited</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:24px;">
+      <h3>What's in each per-test evidence bundle</h3>
+      <div class="grid grid-2" style="margin-top:12px;">
+        <ul>
+          <li><strong>Video recording</strong> of the full test session</li>
+          <li><strong>Screenshots</strong> at every assertion / interaction</li>
+          <li><strong>DOM snapshots</strong> at each step</li>
+        </ul>
+        <ul>
+          <li><strong>Console logs</strong> (errors, warnings, app logs)</li>
+          <li><strong>Network logs</strong> (every request + response)</li>
+          <li><strong>Verdict</strong> (PASS / FAIL) with reasoning + ticket link</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:18px; background:rgba(110, 231, 183, 0.06); border-color:rgba(110, 231, 183, 0.3);">
+      <p style="color:var(--text);"><strong class="accent">The inverse of the usual QA problem.</strong>
+         Normal teams: not enough audit evidence, painful audits. Agent-
+         based QA: too much evidence, you need a retention policy from
+         day one. I deleted most of the 14 GB to free the disk —
+         which is a better problem than "we have no logs."</p>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 4.7 — WHAT THE APP ACTUALLY DOES -->
+<section class="slide" id="scope">
+  <div class="deck">
+    <span class="pill">SO IT'S NOT A TODO APP</span>
+    <h2 style="margin-top:18px;">
+      Eight modules. <span class="accent">Real domain logic.</span>
+    </h2>
+    <p class="lede">"AI built an app" is dismissible. "AI built a system with FIFO inventory accounting and transactional multi-table writes" is not.
+       Specifics, so the scope isn't underestimated:</p>
+
+    <div class="grid grid-2" style="margin-top:24px;">
+      <div class="card">
+        <h3 class="accent">FIFO inventory accounting</h3>
+        <p>Sales auto-allocate across production batches by expiry date. Single sale line can split across multiple batches when qty exceeds the oldest batch's remaining stock.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">Versioned bill-of-materials</h3>
+        <p>Recipes are versioned. Older versions retained for batches produced under them. Cost-per-unit computed live from RM costs and rolled up to product cost.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">Transactional multi-table writes</h3>
+        <p>Production batch creation atomically resolves recipe → pre-checks RM → generates sequenced <code>batch_number</code> → inserts usage manifest → deducts stock. Works around D1's lack of interactive transactions with sequential statements + rollback-on-fail.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">Pre-flight preview</h3>
+        <p>Before producing, the app shows green rows (enough RM) and red rows (shortfall) live. Submit blocks if any shortfall. Live cost preview if RM costs set.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">"Can-produce" computation</h3>
+        <p>Across all recipes vs current RM stock, compute max-produceable qty per SKU with bottleneck-RM identification. A constrained-resource problem, recomputed on every dashboard load.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">Severity-grouped alerts</h3>
+        <p>Info / warning / danger with 24-hour dismiss window and deep-link back to source records (product → stock, RM → adjust, batch → detail).</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">Role-based access</h3>
+        <p>Viewer accounts auto-hide money fields and block all writes; admin sees everything. Cookie-based session, iOS-PWA-friendly strategy.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent">Multi-platform pricing + i18n PWA</h3>
+        <p>Four sales channels per product with autofill on sale entry. Mobile-first PWA, stepper-style flows, bilingual UI with Buddhist-calendar date.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 4.8 — REALISTIC BASELINE -->
+<section class="slide" id="estimate">
+  <div class="deck">
+    <span class="pill">BUILD ESTIMATE — CLAUDE SONNET 4.6</span>
+    <h2 style="margin-top:18px;">
+      Good team. Full AI. <span class="accent">How long does it actually take?</span>
+    </h2>
+    <p class="lede">
+      We handed the full feature scope to Claude Sonnet 4.6 and asked for an honest estimate —
+      two developers, full AI tooling, one dedicated tester. This is the<strong class="good"> best cast </strong> number if
+      2 devs + Claude Opus + Cursor + 1 tester, rolling QA:
+    </p>
+
+    <div class="grid grid-2" style="margin-top:20px;">
+
+      <div class="card">
+        <h3 class="accent">Dev phase — rolling delivery</h3>
+        <p>Two devs split the 8 modules, AI handles boilerplate and first-pass logic.
+           Hard parts — FIFO edge cases, D1 transaction rollback, can-produce solver —
+           still need careful human review. Each module handed to tester when ready.</p>
+      </div>
+
+      <div class="card">
+        <h3 class="accent">QA phase — human tester</h3>
+        <p>Tester writes and runs 100+ cases manually. Bug reports go back to dev,
+           fixes get retested. Multiple cycles on FIFO and transaction logic alone.
+           No audit trail — pass/fail lives in someone's head or a spreadsheet.</p>
+      </div>
+
+    </div>
+
+    <div style="margin-top:20px;display:grid;grid-template-columns:repeat(4,1fr);gap:16px;">
+      <div class="card" style="text-align:center;padding:20px 12px;">
+        <div style="font-size:32px;font-weight:700;" class="accent">2</div>
+        <div style="font-size:13px;font-weight:600;margin-top:4px;">Developers</div>
+        <div style="font-size:12px;opacity:.55;">+ Claude Opus + Cursor $$$</div>
+      </div>
+      <div class="card" style="text-align:center;padding:20px 12px;">
+        <div style="font-size:32px;font-weight:700;" class="accent">6–8</div>
+        <div style="font-size:13px;font-weight:600;margin-top:4px;">Calendar weeks</div>
+        <div style="font-size:12px;opacity:.55;">dev + rolling QA</div>
+      </div>
+      <div class="card" style="text-align:center;padding:20px 12px;">
+        <div style="font-size:32px;font-weight:700;" class="accent">100+</div>
+        <div style="font-size:13px;font-weight:600;margin-top:4px;">Test cases</div>
+        <div style="font-size:12px;opacity:.55;">manual, human-written</div>
+      </div>
+      <div class="card" style="text-align:center;padding:20px 12px;">
+        <div style="font-size:32px;font-weight:700;color:var(--warn, #f59e0b);">5–8%</div>
+        <div style="font-size:13px;font-weight:600;margin-top:4px;">Residual bugs</div>
+        <div style="font-size:12px;opacity:.55;">no independent audit</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px;border-left:3px solid var(--accent);padding:16px 20px;">
+      <strong class="accent">
+        <img src="./assets/jonhny-dead.png" style="height:18px;vertical-align:middle;image-rendering:pixelated;margin-right:6px;" />
+        Optimistic.
+      </strong>
+      <p style="margin:6px 0 0;font-size:14px;">
+        This assumes a disciplined team, no scope creep, and everything going roughly to plan.
+        Most small teams ship faster with more bugs. <strong>Six weeks is the floor, not the average.</strong>
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<!-- SLIDE 5 — PROOF -->
+<section class="slide" id="proof">
+  <div class="deck">
+    <span class="pill">PROOF, WITH HONEST ACCOUNTING</span>
+    <h2 style="margin-top:18px;">
+      Built in <span class="accent">~11.5 active hours</span> across 3 calendar days.
+    </h2>
+    <p class="lede">Production data. Real customers. Real revenue flowing through it on day one.</p>
+
+    <div class="card" style="margin-top:24px;">
+      <div class="label muted" style="font-size:12px; text-transform:uppercase; letter-spacing:0.06em;">49.5 CALENDAR HOURS · ONLY ~23% WAS ACTUAL WORK</div>
+      <div class="bar" style="margin:14px 0 8px;">
+        <div class="seg active" style="width: 23%;">11.5h ACTIVE</div>
+        <div class="seg idle" style="width: 77%;">38h idle (sleep, day job, errands)</div>
+      </div>
+      <p style="font-size:14px;">Calculated from agent timestamps. Any 30+ minute gap between agent actions counts as idle, not work.
+         Multiple agents running in parallel during active windows.</p>
+    </div>
+
+    <div class="grid grid-4" style="margin-top:24px;">
+      <div class="stat">
+        <div class="num accent">107</div>
+        <div class="label">tickets resolved</div>
+        <div class="sub">98 acceptance tests + 9 dev</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">7.9k</div>
+        <div class="label">lines of code</div>
+        <div class="sub">TypeScript + TSX</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">11</div>
+        <div class="label">DB tables</div>
+        <div class="sub">full referential integrity</div>
+      </div>
+      <div class="stat">
+        <div class="num good">100%</div>
+        <div class="label">bug-fix verify rate</div>
+        <div class="sub">every fix retested by QA</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:20px; background:rgba(110, 231, 183, 0.06); border-color:rgba(110, 231, 183, 0.3);">
+      <h3 style="color:var(--accent);">Lines of code I typed into the app: <span style="font-size:42px; font-weight:800;">0</span></h3>
+      <p style="margin-top:6px;">The agents wrote 100% of <code>src/</code>. My role: write the spec,
+         approve the critical ~30% of merges directly, spot-read ~10% of
+         the source code, and personally exercise the full running app in
+         a browser before calling it production-ready.
+         <strong class="accent">Acceptance tester, not line-by-line
+         reviewer.</strong> The QA agent handled the rest.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 6 — TRAFFIC BETWEEN AGENTS -->
+<section class="slide" id="traffic">
+  <div class="deck">
+    <span class="pill">THE TRAFFIC BETWEEN AGENTS</span>
+    <h2 style="margin-top:18px;">
+      Most of the work was <span class="accent">AI to AI tasks.</span>
+    </h2>
+    <p>Every line of code went through at least one round-trip between agents before reaching me. Many went through several.</p>
+
+    <div class="grid grid-4" style="margin-top:24px;">
+      <div class="stat">
+        <div class="num accent">359</div>
+        <div class="label">ticket-system files</div>
+        <div class="sub">specs · submissions · reviews · evidence</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">212</div>
+        <div class="label">submit ↔ review pairs</div>
+        <div class="sub">106 submissions · 106 verdicts</div>
+      </div>
+      <div class="stat">
+        <div class="num warn">16</div>
+        <div class="label">reject → fix → retest</div>
+        <div class="sub">tickets that failed first, passed second</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">232</div>
+        <div class="label">agent handoffs</div>
+        <div class="sub">from 233 distinct agent sessions</div>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:24px;">
+      <div class="card">
+        <h3 class="accent">What "AI-to-AI" looks like in practice</h3>
+        <ul>
+          <li><strong>opus-testcase</strong> writes a ticket → <strong>Jonhny-tester</strong> claims it</li>
+          <li><strong>dev-track</strong> ships code + submits → <strong>Jonhny-tester</strong> picks it up</li>
+          <li><strong>Jonhny-tester</strong> runs the UI in a real browser, captures screenshots → submits PASS/FAIL</li>
+          <li><strong>desktop-opus4.7</strong> reviews evidence → approves or sends back with fix instructions</li>
+          <li>If rejected → <strong>dev-track</strong> patches → <strong>Jonhny-tester</strong> retests → cycle closes</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 class="accent">Why this matters</h3>
+        <p>The human reviewed approximately <strong>107 final approvals</strong>. Behind those approvals: <strong>~250 messages between agents</strong> — specs, submissions, screenshots, verdicts, fix instructions, retests.</p>
+        <p style="margin-top:10px;">A lone-coder workflow with one chat window simply cannot generate that volume of cross-checking. The bug-find rate (8 real bugs caught by QA before reaching the human) only happens when an independent agent exercises the UI.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 7 — PARALLEL TRACKS -->
+<section class="slide" id="parallel">
+  <div class="deck">
+    <span class="pill">WHEN THE WORK HAPPENED</span>
+    <h2 style="margin-top:18px;">
+      Three dev tracks ran <span class="accent">in parallel</span>, not in sequence.
+    </h2>
+    <p>"11.5 active hours" plotted across agents. Tracks overlap because they own different modules and don't block each other.</p>
+
+    <div class="card" style="margin-top:24px;">
+      <div class="label muted" style="font-size:12px; text-transform:uppercase; letter-spacing:0.06em;">APR 24 21:52 → APR 26 23:23 · 49.5H CALENDAR WINDOW</div>
+      <table style="margin-top:14px;">
+        <tr>
+          <td style="width:180px;"><strong>Track 1</strong><br><span class="muted" style="font-size:13px;">Inventory · Claude Desktop</span></td>
+          <td><div class="bar"><div class="seg idle" style="width:5%;"></div><div class="seg active" style="width:8%;"></div><div class="seg idle" style="width:87%;"></div></div></td>
+        </tr>
+        <tr>
+          <td><strong>Track 2</strong><br><span class="muted" style="font-size:13px;">Ops (batches+sales) · Claude Code</span></td>
+          <td><div class="bar"><div class="seg idle" style="width:3%;"></div><div class="seg active" style="width:9%;"></div><div class="seg idle" style="width:88%;"></div></div></td>
+        </tr>
+        <tr>
+          <td><strong>Track 3</strong><br><span class="muted" style="font-size:13px;">Dashboard + alerts · Claude Desktop</span></td>
+          <td><div class="bar"><div class="seg idle" style="width:8.5%;"></div><div class="seg active" style="width:10%;background:var(--warn);"></div><div class="seg idle" style="width:30%;"></div><div class="seg active" style="width:10%;background:var(--warn);"></div><div class="seg idle" style="width:6%;"></div><div class="seg active" style="width:5%;background:var(--warn);"></div><div class="seg idle" style="width:27%;"></div></div></td>
+        </tr>
+        <tr>
+          <td><strong>QA squad</strong><br><span class="muted" style="font-size:13px;">Antigravity · Gemini 3 Pro/Flash</span></td>
+          <td><div class="bar"><div class="seg idle" style="width:28%;"></div><div class="seg active" style="width:3%;background:var(--good);"></div><div class="seg idle" style="width:12%;"></div><div class="seg active" style="width:10%;background:var(--good);"></div><div class="seg idle" style="width:7%;"></div><div class="seg active" style="width:4%;background:var(--good);"></div><div class="seg idle" style="width:8%;"></div><div class="seg active" style="width:3%;background:var(--good);"></div><div class="seg idle" style="width:25%;"></div></div></td>
+        </tr>
+      </table>
+      <p style="font-size:14px; margin-top:14px;">Bars scaled to the calendar window. Empty space = humans sleeping or doing day jobs.
+         <strong>Active time on each track stayed under 4 hours total</strong> because the orchestrator dispatched work intelligently.</p>
+
+    <div class="card" style="margin-top:24px; background:rgba(110, 231, 183, 0.06); border-color:rgba(110, 231, 183, 0.3);">
+      <h3 style="color:var(--accent);">All four ran on one M4 MacBook Pro. Simultaneously.</h3>
+      <p style="color:var(--text); margin-top:8px;">Claude Desktop (Inventory) + Claude Code (Ops) + Claude Desktop (Dashboard+Alerts) + Antigravity (QA squad) — <strong>four concurrent agent platforms, one laptop, one MCP server</strong>. No cloud orchestration, no Kubernetes, no fancy infrastructure. The Gantt bars above are the receipts.</p>
+      <p style="margin-top:8px; font-size:14px;">This is what "multi-agent crew" actually looks like in execution — not three theoretical agents in a diagram. Four real chat windows side by side, claiming tickets from the same queue, writing memory to the same files.</p>
+    </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 8 — THE CREW -->
+<section class="slide" id="crew">
+  <div class="deck">
+    <span class="pill">THE CREW</span>
+    <h2 style="margin-top:18px;">
+      Six roles. <span class="accent">Three platforms.</span>
+    </h2>
+    <p>Different model strengths, different costs, different speeds. Each agent named for what it does, not which model it is.</p>
+
+    <div class="grid grid-3" style="margin-top:30px;">
+      <div class="card">
+        <h3>desktop-opus4.7</h3>
+        <p><span class="accent2">Claude Desktop</span></p>
+        <p style="margin-top:6px;">PM + reviewer · long-context decisions</p>
+        <p style="margin-top:6px;">My main agent</p>
+      </div>
+      <div class="card">
+        <h3>dev-track-1</h3>
+        <p><span class="accent2">Claude Desktop · Opus</span></p>
+        <p style="margin-top:6px;">Inventory module: products / RM / recipes</p>
+      </div>
+      <div class="card">
+        <h3>dev-track-2</h3>
+        <p><span class="accent2">Claude Code · Opus + Sonnet</span></p>
+        <p style="margin-top:6px;">Ops module: production batches + sales</p>
+      </div>
+      <div class="card">
+        <h3>dev-track-3</h3>
+        <p><span class="accent2">Claude Desktop · Opus</span></p>
+        <p style="margin-top:6px;">Dashboard + alerts + auth</p>
+      </div>
+      <div class="card">
+        <h3>opus-testcase</h3>
+        <p><span class="accent2">Claude Code</span></p>
+        <p style="margin-top:6px;">Test plan author · spec → tickets</p>
+      </div>
+      <div class="card">
+        <h3>Jonhny squad</h3>
+        <p><span class="accent2">Antigravity (Gemini 3 Pro / Flash)</span></p>
+        <p style="margin-top:6px;">QA execution · UI tests · screenshots · evidence</p>
+      </div>
+    </div>
+
+    <p style="margin-top:30px;"><strong class="accent">Not interchangeable.</strong>
+       The PM agent doesn't write tests. The tester doesn't pick what to test.
+       Each role has clear inputs and outputs. Each track owns its own routes,
+       tables, and components — they don't overlap.</p>
+     <p class="muted" style="font-size:13px;margin-top:16px;">
+  * One Gemini tester got too comfortable and started fixing the code it was supposed to be testing — then submitted the patch back to Opus like nothing happened. It was not normal. Jonhny has since been reminded of its job title.
+</p>
+</section>
+
+<!-- SLIDE 9 — THE LOOP RUNS ON ONE MCP SERVER -->
+<section class="slide" id="mcp">
+  <div class="deck">
+    <span class="pill">THE ORCHESTRATION LAYER</span>
+    <h2 style="margin-top:18px;">
+      The whole team runs on <span class="accent">one MCP server. (OnBoard < v.2.0)</span>
+    </h2>
+    <p class="lede">An MCP server I built myself — the shared brain every agent
+       reads from and writes to. Without it, this is just a chat window with a fancy name.</p>
+
+    <div class="grid grid-2" style="margin-top:30px;">
+      <div class="card">
+        <h3>What MCP gives us</h3>
+        <p>MCP (Model Context Protocol) is the open spec that lets any AI client — Claude Desktop, Claude Code, Cursor, Antigravity, Codex — call the same set of tools.</p>
+        <p style="margin-top:10px;">I expose a custom server with <strong>29 MCP tools</strong>: agent registry, ticket queue, memory read/write, briefing generator, handoff protocol, ticket review, evidence linker, search across past sessions.</p>
+        <p style="margin-top:10px;">Every agent — regardless of which platform it lives on — connects to the same server and sees the same state.</p>
+      </div>
+      <div class="card">
+        <h3>Why this matters</h3>
+        <ul>
+          <li><strong>Cross-platform memory</strong> — Claude reads what Antigravity wrote</li>
+          <li><strong>Cross-session memory</strong> — today's agent reads yesterday's decisions</li>
+          <li><strong>Auditable</strong> — every read/write is a tool call you can inspect</li>
+          <li><strong>Vendor-neutral</strong> — swap models without re-engineering the loop</li>
+          <li><strong>Local-first</strong> — runs on the developer's machine; data stays in the repo</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 style="margin-top:34px;">The 29 MCP tools fall into five buckets</h3>
+    <div class="grid grid-4" style="margin-top:14px;">
+      <div class="card tight">
+        <h3 class="accent">Agent lifecycle</h3>
+        <p><code>OnBoard</code> · <code>join</code> · <code>handoff</code> · <code>checkpoint</code> · <code>get_briefing</code></p>
+      </div>
+      <div class="card tight">
+        <h3 class="accent">Ticket queue</h3>
+        <p><code>create</code> · <code>claim</code> · <code>submit</code> · <code>review</code> · <code>list</code> · <code>cancel</code></p>
+      </div>
+      <div class="card tight">
+        <h3 class="accent">Persistent memory</h3>
+        <p><code>write</code> · <code>read</code> · <code>search</code> · <code>pin</code> · <code>links</code> · <code>compact</code></p>
+      </div>
+      <div class="card tight">
+        <h3 class="accent">Project context</h3>
+        <p><code>bootstrap</code> · <code>status</code> · <code>doctor</code> · <code>context_dirs</code> · <code>token_usage</code></p>
+      </div>
+    </div>
+    <p style="margin-top:20px;">All open-source. Roughly 2,500 lines of Python.
+       The same server scales from a solo project to a multi-agent team because the abstractions (agents, tickets, memory) are universal.
+       <a href="https://github.com/swisspra/On_Board" style="color:var(--accent2);">github.com/swisspra/On_Board</a></p>
+  </div>
+</section>
+
+<!-- SLIDE 10 — A SPECIFIC EXAMPLE -->
+<section class="slide" id="example">
+  <div class="deck">
+    <span class="pill">A SPECIFIC EXAMPLE</span>
+    <h2 style="margin-top:18px;">
+      The ORM bug that <span class="accent">looked like a UI bug.</span>
+    </h2>
+    <div class="grid grid-2" style="margin-top:26px;">
+      <div>
+        <h3>Symptom</h3>
+        <p>The product list page showed <code>0 in stock</code> for every product. Detail pages were correct.</p>
+
+        <h3 style="margin-top:20px;">Wrong fixes I almost shipped</h3>
+        <ul>
+          <li>"It's a stale React Query cache" — wasn't</li>
+          <li>"It's a custom-domain DNS lag class" — wasn't</li>
+          <li>"It's a viewer-role data-strip bug" — wasn't</li>
+        </ul>
+
+        <h3 style="margin-top:20px;">Real cause</h3>
+        <p>Drizzle's <code>${productBatches}</code> table interpolation, when used inside a correlated subquery's <code>FROM</code>, was lifting the table reference into the <em>outer</em> query's <code>FROM</code>. Cartesian product. <code>SUM</code> returned 0.</p>
+
+        <h3 style="margin-top:20px;">Fix</h3>
+        <p>Replace template-tag references with raw SQL strings inside subqueries. Three lines. Verified in production within 4 minutes.</p>
+      </div>
+      <div>
+        <h3>Why this matters for the pitch</h3>
+        <p>This bug took <strong class="warn">~25 active minutes</strong> from "user reports" to "shipped fix verified by QA agent."</p>
+
+        <ul style="margin-top:14px;">
+          <li><strong>Operator</strong> reported the visual bug</li>
+          <li><strong>desktop-opus4.7</strong> hypothesized 3 wrong causes, then queried D1 directly to rule them out</li>
+          <li>Found the real bug class · wrote a memory entry warning future agents</li>
+          <li>Patched · build · deploy · curl-verified · approved</li>
+        </ul>
+
+        <div class="card" style="margin-top:24px; background:rgba(110, 231, 183, 0.06); border-color:rgba(110, 231, 183, 0.3);">
+          <p style="color:var(--text);"><strong class="accent">Without persistent memory</strong>, the next agent (after handoff) would have wasted hours on the same wrong hypotheses. With memory, the warning is one search away: <code>memory_search "Drizzle subquery"</code></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 10.5 — BUGS FOUND BY QA MID-FLIGHT -->
+<section class="slide" id="qa-bugs">
+  <div class="deck">
+    <span class="pill">EIGHT BUGS THE QA AGENT CAUGHT BEFORE THE HUMAN</span>
+    <h2 style="margin-top:18px;">
+      Not theoretical. <span class="accent">Eight real bugs, mid-flight.</span>
+    </h2>
+    <p>Every one of these caused at least one <code>reject → fix → retest</code> cycle. Every one would have shipped in a single-agent workflow because the model that wrote the code would have "reviewed" it and missed.</p>
+
+    <div class="grid grid-2" style="margin-top:24px;">
+      <div class="card">
+        <h3 class="warn">ORM subquery bug</h3>
+        <p>Product list page summed to 0 across all rows. Drizzle's correlated subquery was lifting the inner table reference into the outer FROM. Cartesian product. <em>25 minutes from report to deployed fix.</em></p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Empty SKU silent fail</h3>
+        <p>Zod schema mismatch swallowed inline errors in product create. UI showed nothing, request 4xx'd silently. QA caught it because the form ran in a real browser.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Trash icon unresponsive</h3>
+        <p><code>window.confirm</code> blocked behind a re-render. QA tapped, nothing happened. Fix: replaced with a proper Dialog component.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Total-stock card missing</h3>
+        <p>Dashboard spec required a total-stock value summary; first build shipped without it. QA flagged on first render. Added before merge.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Sales row totals missing</h3>
+        <p>Sales history rows didn't show qty + total amount. Worse: when added, viewer-role accounts could see them — needed RBAC gating. QA caught both passes.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Date filter timezone bug</h3>
+        <p>Today's sales excluded for users in non-UTC timezones during early-morning hours. <code>toISOString()</code> defaulted to UTC. QA caught by running the filter at 03:00 local.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Alert severity thresholds</h3>
+        <p>Spec said warn=30d / crit=7d near-expiry. Build shipped 30/90. Off-by-window. QA caught by checking the alert classification against the spec verbatim.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Dashboard money leak</h3>
+        <p>Viewer-role accounts saw aggregate revenue numbers on the dashboard despite RBAC rules. QA logged in as viewer and screenshot-verified the leak.</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:24px;">
+      <table>
+        <tr><th>QA category</th><th>Tested</th><th>Passed</th><th>Bugs found</th></tr>
+        <tr><td>Auth &amp; sessions</td><td>8</td><td class="good">8</td><td>0</td></tr>
+        <tr><td>Products &amp; stock</td><td>14</td><td class="good">12</td><td class="warn">2</td></tr>
+        <tr><td>Raw materials</td><td>8</td><td class="good">8</td><td>0</td></tr>
+        <tr><td>Recipes &amp; batches</td><td>17</td><td class="good">17</td><td>0</td></tr>
+        <tr><td>Sales &amp; FIFO</td><td>20</td><td class="good">18</td><td class="warn">2</td></tr>
+        <tr><td>Dashboard</td><td>5</td><td class="good">4</td><td class="warn">1</td></tr>
+        <tr><td>Alerts</td><td>8</td><td class="good">5</td><td class="warn">3</td></tr>
+        <tr><td>NFR (security, perf, i18n)</td><td>8</td><td class="good">8</td><td>0</td></tr>
+      </table>
+    </div>
+    <p style="font-size:14px; margin-top:14px;" class="muted">8 bugs found mid-flight across 88 acceptance tests. A lone-coder workflow with one chat window would have shipped most of them.</p>
+  </div>
+</section>
+
+<!-- SLIDE 11 — THE COST -->
+<section class="slide" id="cost">
+  <div class="deck">
+    <span class="pill">THE COST</span>
+    <h2 style="margin-top:18px;">
+      Total stack cost: <span class="accent">~$80/month.</span>
+    </h2>
+    <p class="lede">Two Claude seats. One Antigravity seat. A self-hosted memory MCP server doing all the orchestration. No API spend. No per-token bill.</p>
+
+    <div class="grid grid-4" style="margin-top:30px;">
+      <div class="stat">
+        <div class="num accent small">$60<span style="font-size:18px; color:var(--muted);">/mo</span></div>
+        <div class="label">Claude Pro × 3</div>
+        <div class="sub">Two accounts · Desktop + Code on each</div>
+      </div>
+      <div class="stat">
+        <div class="num accent small">$20<span style="font-size:18px; color:var(--muted);">/mo</span></div>
+        <div class="label">Antigravity</div>
+        <div class="sub">QA squad · Gemini 3 Pro / Flash</div>
+      </div>
+      <div class="stat">
+        <div class="num good small">$0</div>
+        <div class="label">Memory MCP server</div>
+        <div class="sub">Self-hosted · the orchestration layer</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">$80<span style="font-size:18px; color:var(--muted);">/mo</span></div>
+        <div class="label">Total stack</div>
+        <div class="sub">All-in · flat rate · no surprise bills</div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:34px;">What this would cost on traditional dev</h3>
+    <div class="grid grid-2" style="margin-top:14px;">
+      <div class="card">
+        <h3 class="warn">Freelance route — direct labor only</h3>
+        <p>Senior full-stack ฿12k/day × 8–10 days <strong>plus</strong> a dedicated QA tester ฿8k/day × 3–4 days <strong>plus</strong> Cursor Pro × 2 seats.</p>
+        <p style="margin-top:10px;"><span class="price-tag">~$3,500-4,500 for one delivery</span></p>
+        <p style="margin-top:10px; font-size:14px;">Assumes you can find, vet, and manage the contractors yourself. No warranty. No fixes after handover.</p>
+      </div>
+      <div class="card">
+        <h3 class="warn">Software house route — quoted price</h3>
+        <p>Same scope, quoted by a small dev agency: project management, business analyst, senior dev, QA, design, post-launch warranty, contingency, agency margin.</p>
+        <p style="margin-top:10px;"><span class="price-tag">~$10,000-15,000 for one delivery</span></p>
+        <p style="margin-top:10px; font-size:14px;">Real-world quote. The freelance number above is the <em>direct labor</em> hiding inside it.</p>
+      </div>
+    </div>
+    <p style="margin-top:20px;"><strong class="accent">~58× cheaper than freelance · ~165× cheaper than agency</strong> for the first delivery, and the AI stack keeps running for $80/mo afterwards. The contractor walks away.</p>
+
+    <div class="grid grid-2" style="margin-top:24px;">
+      <div class="card">
+        <h3 class="accent">Why $20/mo for the tester actually works</h3>
+        <p>Antigravity's lowest paid tier is <strong>not throttling</strong> the QA squad for any realistic workload. The cheapest seat on the team is the one that runs effectively 24/7. The QA agent racks up the audit-trail hours; the dev seats handle the bursts.</p>
+      </div>
+      <div class="card">
+        <h3 class="accent2">11.5 active hours is the floor, not the ceiling</h3>
+        <p>Running agents inside IDEs (Claude Desktop, Cursor, Antigravity) means the IDE has to stay open for long-poll tasks — and IDEs timeout / error / lose focus during multi-hour runs. <strong>CLI-based runners (Claude Code CLI, Codex CLI) eliminate that.</strong> Same loop, less wall-clock, less babysitting. If you scaled this with paid CLI tools, the active-hours number would drop further.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 12 — SCALE -->
+<section class="slide" id="scale">
+  <div class="deck">
+    <span class="pill">PAST THE FIRST PITCH</span>
+    <h2 style="margin-top:18px;">
+      The loop didn't break with scale. <span class="accent">It got denser.</span>
+    </h2>
+    <p>The original case study was Apr 24–26. The project kept going — schema migrations 0026/0027, R2 nightly backups via Cloudflare Cron, full audit-trail upgrades. The same MCP server runs it all.</p>
+
+    <div class="grid grid-4" style="margin-top:24px;">
+      <div class="stat">
+        <div class="num accent">584</div>
+        <div class="label">Agent session entries</div>
+        <div class="sub">vs 233 at v1 pitch</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">94</div>
+        <div class="label">Distinct agent names</div>
+        <div class="sub">tester, dev, PM, reviewer roles</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">7+</div>
+        <div class="label">Platforms</div>
+        <div class="sub">claude-desktop · claude-code · codex · antigravity · cursor · ...</div>
+      </div>
+      <div class="stat">
+        <div class="num accent">22</div>
+        <div class="label">Checkpoints</div>
+        <div class="sub">recoverable state snapshots</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:24px;">
+      <h3>The agent registry, today</h3>
+      <p>Sample of names from the live <code>agents.json</code> for this project:</p>
+      <pre><code>desktop-opus4.7         Jonhny-tester-nemotron    dev-track-2-opus4.7
+dev-track-1-sonnet4.6   pro-license-opus4.7       Jonhny-gemini3
+opus-testcase-gpt5.4    dev-cursor-composer       Jonhny-antigravity-main-v2
+Sparky-v2-flash-v2      Zippy-v2-flash-v1         Flash-v2-flash-v1
+Dismisser-v2-flash-v1   Jonhny-gemini35-flash8b-v1.0   ...</code></pre>
+      <p style="font-size:13px; margin-top:10px;">Names tell you the role and the model. Roles stay stable across sessions; only the model suffix changes when an agent is swapped.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 13 — WHAT WE'RE SELLING -->
+<section class="slide" id="product">
+  <div class="deck">
+    <span class="pill">THE PRODUCT BEHIND THE PROJECT</span>
+    <h2 style="margin-top:18px;">
+      We're not building the app.<br>
+      We build the <span class="accent">orchestration layer.</span>
+    </h2>
+
+    <div class="grid grid-2" style="margin-top:30px;">
+      <div class="card">
+        <h3>What you build with it</h3>
+        <ul>
+          <li>Internal tools (CRMs, dashboards, admin panels)</li>
+          <li>SaaS prototypes that convert to real products</li>
+          <li>Operations apps for SMBs (inventory, scheduling, comms)</li>
+          <li>Bespoke integrations between tools you already pay for</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>What's in the box</h3>
+        <ul>
+          <li><code>memory_*</code> tools: agent registry, tickets, briefings, digests</li>
+          <li>Role conventions and handoff protocol</li>
+          <li>QA evidence pipeline (Antigravity sub-agent → repo → review)</li>
+          <li>Memory compaction (rule-based, free) when context grows</li>
+        </ul>
+      </div>
+    </div>
+
+    <p style="margin-top:30px;"><strong class="accent">The bet:</strong> the loop generalizes. This app is the existence proof. The thing we sell is the loop, packaged so anyone can run it.</p>
+  </div>
+</section>
+
+<!-- SLIDE 14 — HONEST GAPS -->
+<section class="slide" id="gaps">
+  <div class="deck">
+    <span class="pill">HONEST GAPS</span>
+    <h2 style="margin-top:18px;">
+      What today's release doesn't do — <span class="accent">all addressable.</span>
+    </h2>
+    <div class="grid grid-2" style="margin-top:24px;">
+      <div class="card">
+        <h3>No fully autonomous mode</h3>
+        <p>A human is in the loop — as the acceptance tester. By design. The QA agent gates per-merge; the human gates the running app.</p>
+      </div>
+      <div class="card">
+        <h3>No cross-project memory yet</h3>
+        <p>Each <code>.agent-mem/</code> is per-repo. If you want one crew across 3 codebases, you federate them manually today. Cross-project federation is on the wishlist.</p>
+      </div>
+      <div class="card">
+        <h3>No interactive operator web console</h3>
+        <p>There IS a live observability dashboard (agent grouping, platform colors, orphan ticket detection, idle indicators — since v3.0). An interactive claim/review/dispatch console is on the wishlist.</p>
+      </div>
+      <div class="card">
+        <h3>No public REST API</h3>
+        <p>It's all MCP-based. Other agents can join if they speak MCP, but there's no REST endpoint for "kick off a job from your IDE." An A2A adapter on the wishlist would partially address this.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 14.5 — WHAT'S ALREADY SHIPPED -->
+<section class="slide" id="shipped">
+  <div class="deck">
+    <span class="pill">WHAT'S ALREADY SHIPPED</span>
+    <h2 style="margin-top:18px;">
+      Not vaporware — <span class="accent">a personal-use project that ships weekly.</span>
+    </h2>
+    <p>OnBoard has been iterating in production for ~4 weeks with weekly releases. The operator uses it daily, which is why bugs get fixed fast and small features land quickly.</p>
+
+    <div class="grid grid-2" style="margin-top:24px;">
+      <div class="card">
+        <h3>v3.5 · OnBoard protocol (May 9)</h3>
+        <p>One-call <code>memory_OnBoard</code> · XML protocol tags · <code>memory_links</code> for ticket/file/agent linkage · <code>memory_doctor</code> data-integrity warnings · pytest workflow harness · ticket-mutation gating</p>
+      </div>
+      <div class="card">
+        <h3>v3.2 · workflow UX (May 8)</h3>
+        <p>Four briefing modes (brief / normal / deep / handoff-only) · ranked memory search · optional local vector search (<code>AGENT_MEM_VECTOR_BACKEND=local</code>) · review-first compaction</p>
+      </div>
+      <div class="card">
+        <h3>v3.1 · ticket schema (Apr 24)</h3>
+        <p>Required fields on ticket creation: <code>target_url</code>, <code>scope</code>, <code>required_fields</code> · MCP rejects malformed tickets at creation time, not after a wasted subagent run · agent rejoin dedup</p>
+      </div>
+      <div class="card">
+        <h3>v3.0 · reliability + dashboard (Apr 21)</h3>
+        <p>Heartbeat tracking · idle auto-KIA (30 min, configurable) · live dashboard with agent grouping, platform colors, orphan ticket detection, idle indicators · naming validation</p>
+      </div>
+    </div>
+
+    <div class="grid grid-2" style="margin-top:18px;">
+      <div class="card">
+        <h3>Parallel agent dispatch</h3>
+        <p>Three dev tracks + a separate QA squad run concurrently (see the Gantt slide). The practical ceiling is "how many AI clients can your machine run at once" — on an M4 MacBook Pro that's a small number, not a protocol-side problem.</p>
+      </div>
+      <div class="card">
+        <h3>Role / ticket templates</h3>
+        <p>opus-testcase, dev-track-N, Jonhny-tester, desktop-opus — plus the acceptance-test patterns and ticket schema. Working in the case study since v1. Not yet packaged for outside drop-in, but the role names and schema are documented enough to replicate. <strong class="accent">Recommended for best result.</strong></p>
+      </div>
+    </div>
+
+    <p class="muted" style="margin-top:24px; font-size:14px;">First-class on every platform with an MCP client: Claude Desktop, Claude Code, Cursor, Codex, AntiGravity — same server, same memory, same tickets. Full CHANGELOG in the repo.</p>
+  </div>
+</section>
+
+<!-- SLIDE 15 — WISHLIST (was: ROADMAP) -->
+<section class="slide" id="roadmap">
+  <div class="deck">
+    <span class="pill">WISHLIST</span>
+    <h2 style="margin-top:18px;">No dates. <span class="accent">Maintained at the pace of personal use.</span></h2>
+    <p class="lede">OnBoard is a one-person project that the operator uses daily. Bugs get fixed fast. Wishlist items ship when they ship. The list below is priority order, not a calendar.</p>
+
+    <div class="card" style="margin-top:24px;">
+      <ul style="font-size:17px; line-height:1.7;">
+        <li><strong>Cross-project memory federation</strong> — one agent crew across multiple repos with linked memory</li>
+        <li><strong>A2A protocol adapter</strong> (read-mostly) — derived <code>Task</code> / <code>AgentCard</code> projection so external A2A agents can plug in</li>
+        <li><strong>Public release of the role/ticket templates</strong> — they already exist and have been used in the case study since v1 (see "What's already shipped"); just not yet packaged as a clean drop-in kit for outside users. <strong class="accent">Recommended for best result</strong> if you replicate the loop.</li>
+        <li><strong>Interactive operator web console</strong> — claim/review tickets, dispatch agents, approve from a phone (distinct from the current observability dashboard)</li>
+      </ul>
+
+  </div>
+</section>
+
+<!-- SLIDE 16 — CLOSE -->
+<section class="slide" id="close">
+  <div class="deck">
+    <h1>
+      It's <span class="accent">open source.</span><br>
+      Run it. Cover it. Build on it.
+    </h1>
+    <p class="lede">If "AI can do this in 11 hours" sounds wrong, that's the right reaction.
+       Clone the repo. Run the loop on your own project. Time the active hours yourself.</p>
+
+    <div class="grid grid-1" style="margin-top:36px;">
+      <div class="card">
+        <h3>For developers</h3>
+        <p>Clone, point at your project, OnBoard your first agent. 10 minutes.</p>
+        <p style="margin-top:10px;"><a href="https://github.com/swisspra/On_Board" style="color:var(--accent2);">github.com/swisspra/On_Board</a></p>
+        <p style="margin-top:10px; font-size:13px; color:var(--muted);">★ the repo if you want multi-agent dev with a real QA gate to be a thing more people try.</p>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:30px; background:rgba(110, 231, 183, 0.05); border-color:rgba(110, 231, 183, 0.25);">
+      <h3 style="color:var(--accent);">No catch.</h3>
+      <p>MCP server is Apache-2.0 on GitHub today. The case-study app is a hobby business I run; If something commercial happens later, fine — not today.</p>
+    </div>
+
+    <div class="footer">
+      Swiss P. · solo operator · pitch deck v6 · 2026-05-12<br>
+      Case-study production app: live with real customers; URL withheld for personal reasons. Sanitized screenshots + walkthrough available on request.
+    </div>
+  </div>
+</section>
+
+</body>
+</html>
