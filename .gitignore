@@ -17,3 +17,6 @@ venv/
 # Project instructions (local only)
 CLAUDE.md
 AGENTS.md
+
+# Development
+docs/
