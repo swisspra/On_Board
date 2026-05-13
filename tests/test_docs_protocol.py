@@ -45,9 +45,17 @@ def test_setup_uses_shared_agent_rules_template():
     assert "templates/agent-rules.md" in setup
     assert "RULES_NOTE=\"$(cat \"$RULES_TEMPLATE\")\"" in setup
     assert "Re-join after every off-board action" in template
+    assert "joins the session and returns the briefing in one call" in template
+    assert "target_url" in template
+    assert "required_fields" in template
+    assert "description" in template
+    assert "5000" in template
+    assert "memory_read since_minutes=30" in template
+    assert "Commit carefully in shared working trees" in template
     assert "memory_submit_ticket" in template
     assert "Cloudflare Pages" not in template
     assert "netlea" not in template.lower()
+    assert "migration" not in template.lower()
 
 
 def test_start_hooks_point_agents_to_memory_onboard():
