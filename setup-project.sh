@@ -46,6 +46,21 @@ if [ -f "$SCRIPT_DIR/SKILL.md" ]; then
     echo "✅ SKILL.md copied to .claude/skills/agent-memory/"
 fi
 
+# ── 1c. Copy bundled skills (optional add-ons like memory-digest-thrift) ──
+BUNDLED_SKILLS_SRC="$SCRIPT_DIR/skills"
+if [ -d "$BUNDLED_SKILLS_SRC" ]; then
+    for skill_dir in "$BUNDLED_SKILLS_SRC"/*/; do
+        [ -d "$skill_dir" ] || continue
+        skill_name=$(basename "$skill_dir")
+        skill_dst="$PROJECT_DIR/.claude/skills/$skill_name"
+        mkdir -p "$skill_dst"
+        if [ -f "$skill_dir/SKILL.md" ]; then
+            cp "$skill_dir/SKILL.md" "$skill_dst/SKILL.md"
+            echo "✅ Bundled skill: $skill_name → .claude/skills/$skill_name/"
+        fi
+    done
+fi
+
 # ── 2. Set up Cursor hooks ──
 CURSOR_DIR="$PROJECT_DIR/.cursor"
 mkdir -p "$CURSOR_DIR"

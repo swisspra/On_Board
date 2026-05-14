@@ -218,7 +218,7 @@ State and context:
 Compaction:
 `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive`
 
-Recommended compaction flow: run `memory_token_usage`, review old entries with `memory_prepare_compaction`, then run `memory_compact(use_llm=false)` when the preview looks safe.
+Recommended compaction flow: run `memory_token_usage`, review old entries with `memory_prepare_compaction`, write one `Digest: <agent>` context entry per cold agent group, then run `memory_compact(strategy='agent')`. Use `memory_compact(strategy='regex')` as deterministic fallback.
 
 Tickets:
 `memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets`

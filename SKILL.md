@@ -165,10 +165,10 @@ memory_prepare_compaction()
 ```
 Read the output, write your own summary, then archive:
 ```
-memory_write(memory_type="context", title="Digest: ...", content="your summary")
-memory_compact(use_llm=False)
+memory_write(memory_type="context", title="Digest: <agent> (<period>)", content="your non-blank summary")
+memory_compact(strategy="agent")
 ```
-You ARE an LLM — summarize yourself instead of paying for another API call.
+Fallback if you cannot write digests safely: `memory_compact(strategy="regex")`.
 
 ---
 

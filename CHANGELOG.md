@@ -1,5 +1,12 @@
 # Changelog
 
+## Nightly
+
+### Changed
+- Added agent-written memory digest compaction with `strategy='agent'`, averaging ~60% token reduction for `memory_compact` in digest benchmarks.
+
+---
+
 ## v3.5.2 — Context Dir Template (2026-05-09)
 
 **Small template fix for projects that use external reference directories.**

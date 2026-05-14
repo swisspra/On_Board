@@ -42,7 +42,7 @@ fi
 
 if [ "$SYNCED" -eq 0 ] && [ -d "venv" ]; then
     echo "📦 Updating local venv..."
-    ./venv/bin/pip install -q httpx "mcp[cli]" pydantic 2>/dev/null
+    ./venv/bin/pip install -q "mcp[cli]" pydantic 2>/dev/null
     TOOLS=$(./venv/bin/python -c "
 import sys; sys.path.insert(0, '.')
 from server import mcp
@@ -126,7 +126,7 @@ for DEST in "${TARGETS[@]}"; do
     fi
 
     if [ "$DEPLOY_SYNCED" -eq 0 ] && [ -f "$DEST/venv/bin/pip" ]; then
-        "$DEST/venv/bin/pip" install -q httpx "mcp[cli]" pydantic 2>/dev/null
+        "$DEST/venv/bin/pip" install -q "mcp[cli]" pydantic 2>/dev/null
     fi
 
     TOOLS="?"
