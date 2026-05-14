@@ -21,3 +21,5 @@ AGENTS.md
 # Development
 docs/
 .cursorrules
+*.original.md
+*.original.*
