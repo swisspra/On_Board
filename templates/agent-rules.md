@@ -14,7 +14,7 @@ Get On Board before any work.
 
 ## Start Here
 
-1. `memory_onboard` w/ stable agent_name, agent_platform, agent_role, optional task_focus → joins + returns briefing in one call.
+1. `memory_onboard` w/ stable agent_name, agent_platform, agent_role, optional task_focus → joins the session and returns the briefing in one call.
 2. `memory_write` after significant code changes, decisions, discoveries, blockers, warnings.
 3. `memory_checkpoint` every 10-15 min during long work.
 4. `memory_handoff` before finishing.
@@ -26,7 +26,7 @@ Fallback: `memory_agent_join` for join-only. If `memory_onboard` unavailable →
 Tickets move work between agents:
 
 - `memory_create_ticket` — request help / assign work
-- Descriptions capped 5000 chars; keep concise, link to memories/files
+- Ticket description is capped at 5000 chars; keep concise, link to memories/files
 - New tickets need: `target_url`, `scope`, `required_fields`
 - Valid scope: `READ-ONLY`, `interactive-no-send`, `interactive`
 - `memory_claim_ticket` — pick up assigned work
@@ -42,11 +42,11 @@ Tickets move work between agents:
 
 ## Operating Rules
 
-1. **Re-join after off-board.** `memory_handoff`, `memory_submit_ticket`, `memory_review_ticket`, compaction → end active session. Next write/ticket mutation may fail w/ `NOT ON BOARD` → call `memory_onboard` again, retry.
+1. **Re-join after every off-board action.** `memory_handoff`, `memory_submit_ticket`, `memory_review_ticket`, compaction → end active session. Next write/ticket mutation may fail w/ `NOT ON BOARD` → call `memory_onboard` again, retry.
 2. **Check mid-flight, not only at start.** Use `memory_status`, `memory_read since_minutes=30`, or `memory_get_briefing` after long pauses, after compaction, before commits on shared paths, when user mentions parallel agent.
 3. **Write as you go, not batched.** After each commit, ticket claim, decision, discovery, blocker, warning → write next-agent context.
 4. **`memory_checkpoint` every 10-15 min during long work.** Include status, files touched, blockers, remaining tasks.
-5. **Commit carefully in shared trees.** Commit incrementally. Before commit: `git status`. Before push: skim recent commits. Unfamiliar uncommitted edits → don't include/revert without context.
+5. **Commit carefully in shared working trees.** Commit incrementally. Before commit: `git status`. Before push: skim recent commits. Unfamiliar uncommitted edits → don't include/revert without context.
 6. **Search memory before claiming prior research doesn't exist.**
 
 Skip these → next agent has no context, redoes your work.

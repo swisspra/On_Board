@@ -107,12 +107,17 @@ Add to your MCP client config:
       "command": "uv",
       "args": ["run", "--directory", "/full/path/to/On_Board", "python", "server.py"],
       "env": {
-        "AGENT_PROJECT_DIR": "/full/path/to/your/project"
+        "AGENT_PROJECT_DIR": "/full/path/to/your/project",
+        "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
       }
     }
   }
 }
 ```
+
+`AGENT_MEM_CONTEXT_DIRS` is optional. Remove it if you do not need external
+reference folders; keep it when agents should browse shared docs/specs with
+`memory_context_dirs` and `memory_context_read`.
 
 In your first chat with any MCP-aware agent (Claude Desktop, Claude Code,
 Cursor, Codex, Antigravity):
