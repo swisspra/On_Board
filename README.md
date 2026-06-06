@@ -1,21 +1,95 @@
-# On Board - Cross-Platform Agent Shared Memory MCP
+# On Board
 
-One project, one shared memory, every agent platform.
+> **The shared brain for a multi-agent dev team.**
+> Tickets, persistent memory, and a QA gate that catches what the coder
+> agent misses. Vendor-neutral. Local-first. Open source.
 
-On Board stores project context in `.agent-mem/` so Claude, Cursor, Codex, Claude Code, AntiGravity, and other MCP clients can continue work without losing decisions, warnings, tickets, or handoffs.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)]()
+[![A2A interop](https://img.shields.io/badge/A2A-adapter%20on%20roadmap-8ea0c2)]()
 
-## v3.5 Highlights
+---
 
-- `memory_onboard` is now the preferred first call for every agent session.
-- XML protocol tags are included in onboarding, generated rules, and start hooks to make agent instructions harder to miss.
-- Ticket-focused briefing, `related_tickets`, and `memory_links` connect tickets, memories, files, agents, and tags.
-- `memory_doctor` and the live dashboard now surface data-health and linkage warnings.
-- Ticket mutations are blocked until the agent is on board.
-- A pytest suite now covers workflow behavior, docs/protocol drift, and dashboard linkage.
+## What this is
 
-## Quick Start
+A self-hosted MCP server that turns Claude Desktop, Claude Code, Codex,
+Cursor, and Antigravity into **one engineering team that actually
+remembers**. Every agent — regardless of platform — joins the same
+project memory, claims tickets from the same queue, and submits work to
+the same review gate.
 
-Recommended local checkout with `uv`:
+```
+spec  →  build  →  test in a real browser  →  review  →
+reject + fix instructions  →  retest  →  approve
+```
+
+This is the loop a human engineering team runs. On Board lets a team of
+AI agents run it.
+
+## Why this exists
+
+I built this because I got sick of three things:
+
+1. **Every new chat is amnesia.** I was re-explaining the codebase, the
+   conventions, and "the bug we already fixed last Tuesday" to every new
+   session.
+
+2. **One model wrote the code and "reviewed" it.** There was no second
+   pair of eyes. Bugs shipped because the same agent never caught its
+   own mistakes.
+
+3. **My Claude Pro quota was the bottleneck**, not the work. I had three
+   Pro accounts sitting idle while one throttled.
+
+On Board fixes all three:
+
+- **Persistent memory** — `.agent-mem/` in the repo, gitignored. The next
+  session reads a briefing and picks up cold.
+- **Independent review gate** — a separate agent runs the UI in a real
+  browser, captures screenshots, and submits PASS/FAIL with evidence.
+  Rejected tickets come back with fix instructions, not death.
+- **Multi-account orchestration** — when one Claude Pro seat throttles,
+  the orchestrator routes the next ticket to another. The whole stack
+  runs on seat plans, not pay-per-token APIs.
+
+## Proof
+
+A real production app — a small-business inventory + sales + production
+batches + FIFO cost accounting system — was built using this loop.
+
+```
+107 tickets resolved · 232 agent handoffs · 212 submit ↔ review pairs
+16 reject → fix → retest cycles · 100% bug-fix verify rate
+11.5 active hours over 49.5 calendar hours
+$60/month total stack cost · 0 lines of code typed by the human
+```
+
+The full case study with screenshots, cost breakdown, and a worked example
+of a real ORM bug the QA loop caught (Drizzle correlated subquery → 25
+active minutes from bug report to deployed fix) is in the **[pitch deck](./docs/pitch.html)**.
+
+## Who this is for
+
+- **Solo devs** running parallel agents and losing context between sessions
+- **Engineering managers** with a backlog of small internal tools that
+  nobody has time to staff
+- **Indie hackers / agency owners** delivering CRUD apps and ops tools
+  for SMBs
+- **A2A-curious teams** looking for a memory + accountability layer that
+  speaks MCP today and A2A tomorrow
+
+This is NOT for: autonomous AI advocates who want a "no-human-in-the-loop"
+agent swarm. By design, On Board keeps a human in the loop — as the
+**acceptance tester**, not the line-by-line code reviewer. The QA agent
+is the per-merge gate; the human is the running-app gate. In the case
+study, the human approved roughly 30% of merges directly (the critical
+ones), spot-read ~10% of the source code, and ran end-to-end manual
+acceptance testing of the whole app before declaring it production-ready.
+Trust is earned per project.
+
+---
+
+## Quick start
 
 ```bash
 git clone https://github.com/swisspra/On_Board.git
@@ -24,7 +98,7 @@ uv sync
 uv run python server.py
 ```
 
-Use `uv run --directory` in MCP configs so the server always runs from this checkout:
+Add to your MCP client config:
 
 ```json
 {
@@ -33,247 +107,259 @@ Use `uv run --directory` in MCP configs so the server always runs from this chec
       "command": "uv",
       "args": ["run", "--directory", "/full/path/to/On_Board", "python", "server.py"],
       "env": {
-        "AGENT_PROJECT_DIR": "/full/path/to/your/project",
-        "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
+        "AGENT_PROJECT_DIR": "/full/path/to/your/project"
       }
     }
   }
 }
 ```
 
-`AGENT_MEM_CONTEXT_DIRS` is optional. Set it when agents should browse external reference folders with `memory_context_dirs` and `memory_context_read`; remove it if the project memory should stay self-contained.
+In your first chat with any MCP-aware agent (Claude Desktop, Claude Code,
+Cursor, Codex, Antigravity):
 
-This repo documents `uv run` for now, not `uvx`. `uvx` is better after On Board has a published package entrypoint/console script; until then, `uv run --directory` is the reliable checkout-based path.
-
-Classic venv install also works:
-
-```bash
-git clone https://github.com/swisspra/On_Board.git
-cd On_Board
-python3 -m venv venv
-./venv/bin/pip install -e .
+```
+memory_onboard(
+  agent_name="dev-main",
+  agent_platform="claude-code",
+  agent_role="main"
+)
 ```
 
-Use the full Python path from that venv when configuring clients:
+That's it. The agent now sees the project briefing, the open tickets, the
+recent memory, and the protocol it should follow. Every subsequent action
+is stamped with its identity.
 
-```bash
-/full/path/to/On_Board/venv/bin/python
+Full client setup (Claude Desktop, Cursor, Codex, AntiGravity): see
+[docs/SETUP.md](./docs/SETUP.md).
+
+---
+
+## The loop in one example
+
+```
+1. SPEC
+   opus-testcase reads requirement → writes 5–20 acceptance tickets
+   with explicit pre/post conditions.
+
+2. BUILD
+   dev-track-2 claims a ticket → implements in src/ → submits with
+   file diff + test plan.
+
+3. TEST
+   Jonhny-tester picks up submission → runs UI in Chromium → captures
+   screenshots → submits PASS or FAIL with evidence.
+
+4. REVIEW
+   desktop-opus4.7 (or the human) checks evidence → approves OR rejects
+   with concrete fix instructions.
+
+   If rejected → ticket reopens → dev-track-2 patches → Jonhny retests
+   → loop closes.
 ```
 
-## MCP Client Setup
+When this loop runs cleanly, a single ticket goes from `open` to "shipped
+to production" in 4–15 minutes of agent time. The human checks in at the
+end, not in the middle.
 
-For `uv`-based setup, use [configs/uv-mcp.json](configs/uv-mcp.json) as the base template for any MCP client that accepts JSON config.
+---
 
-### Claude Desktop
+## Tools (29 MCP tools, 5 buckets)
 
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+| Bucket | Tools |
+|---|---|
+| **Agent lifecycle** | `memory_onboard`, `memory_agent_join`, `memory_handoff`, `memory_checkpoint`, `memory_get_briefing` |
+| **Ticket queue** | `memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets` |
+| **Persistent memory** | `memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links`, `memory_pin` |
+| **Project context** | `memory_init`, `memory_bootstrap`, `memory_status`, `memory_doctor`, `memory_update_state`, `memory_context_dirs`, `memory_context_read` |
+| **Compaction** | `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive` |
 
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "command": "/full/path/to/venv/bin/python",
-      "args": ["/full/path/to/server.py"],
-      "env": { "AGENT_PROJECT_DIR": "/full/path/to/your/project" }
-    }
-  }
-}
+Full reference: [docs/TOOLS.md](./docs/TOOLS.md).
+
+---
+
+## What makes this different from other memory MCPs
+
+Several memory MCP servers exist. I didn't know that when I started — I
+built this for myself. But the difference matters:
+
+| Most memory MCPs | On Board |
+|---|---|
+| Vector store of conversation history | Memory **AND** a ticket queue **AND** a review gate |
+| Single-agent retrieval | Multi-agent identity, KIA detection, handoff protocol |
+| No notion of work state | `open → claimed → submitted → reviewed → closed` lifecycle |
+| No QA gate | Independent agent runs the UI, captures evidence, PASS/FAIL |
+| One-vendor focus | Tested on 7+ platforms simultaneously |
+
+The unique thing here is the **loop**, not the memory. Memory is the
+substrate that makes the loop possible.
+
+---
+
+## Honest gaps
+
+- **No fully autonomous mode.** A human is in the loop — as the acceptance
+  tester. By design.
+- **No cross-project memory yet.** Each `.agent-mem/` is per-repo.
+  Federation is on the wishlist (see below) — no committed date.
+- **No interactive operator web console** (claim/review/dispatch from a
+  browser). There IS a live observability dashboard with agent grouping,
+  platform colors, orphan ticket detection, and idle indicators (since v3.0).
+  An interactive console is on the wishlist.
+- **No public REST API.** It's all MCP. Other agents can join if they
+  speak MCP. An A2A adapter is on the wishlist and would partially
+  address this.
+
+---
+
+## A2A interop (wishlist, no date)
+
+A2A adapter is on the wishlist (no committed date — see roadmap section
+below). Mapping when shipped:
+
+- A2A `context_id` ↔ On Board active session
+- A2A `tenant` ↔ `AGENT_PROJECT_DIR`
+- A2A `Task` ↔ derived read-only projection of an On Board ticket
+- A2A `INPUT_REQUIRED` ↔ awaiting reviewer
+- A2A `REJECTED` ↔ **never mapped** from On Board reviewer-reject (which
+  is non-terminal and retry-friendly; A2A REJECTED is terminal)
+
+On Board would expose A2A as an output format, not an input format. The
+MCP session gate would remain the entry point. See [docs/ideas/ideas.txt](./docs/ideas/ideas.txt)
+for the full design discussion.
+
+---
+
+## Project structure (runtime data)
+
 ```
-
-### Cursor
-
-Add to your project `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "command": "/full/path/to/venv/bin/python",
-      "args": ["/full/path/to/server.py"],
-      "env": { "AGENT_PROJECT_DIR": "${workspaceFolder}" }
-    }
-  }
-}
-```
-
-### Claude Code
-
-```bash
-claude mcp add agent-memory -- /full/path/to/venv/bin/python /full/path/to/server.py
-```
-
-### Codex
-
-```bash
-codex mcp add agent-memory \
-  --env AGENT_PROJECT_DIR="/full/path/to/your/project" \
-  -- /full/path/to/venv/bin/python /full/path/to/server.py
-```
-
-To use Codex hooks, enable the experimental hook feature in `~/.codex/config.toml`:
-
-```toml
-[features]
-codex_hooks = true
-```
-
-### AntiGravity
-
-Use the MCP settings UI:
-
-- Command: `/full/path/to/venv/bin/python`
-- Arguments: `/full/path/to/server.py`
-- Environment: `AGENT_PROJECT_DIR=/full/path/to/your/project`
-
-## Project Installer
-
-Run this from the target project root:
-
-```bash
-bash /path/to/agent_mem_MCP/setup-project.sh
-```
-
-It installs project-local helper files:
-
-```text
 your-project/
-├── .agent-mem/                         Runtime memory, gitignored
-├── .agent-mem-hooks/                   Cursor and Claude Code hook scripts
-├── .codex/hooks.json                   Codex hook config
-├── .codex/hooks/                       Codex hook scripts
-├── .cursor/hooks.json                  Cursor hook config
-├── .claude/settings.json               Claude Code hook config
-├── .agent/rules/on-board-agent-memory.md  AntiGravity workspace rule
-├── AGENTS.md                           Codex rules
-├── CLAUDE.md                           Claude Code rules
-└── .cursorrules                        Cursor rules
+├── .agent-mem/                runtime memory, gitignored
+│   ├── project.json
+│   ├── agents.json            agent registry (identity, status, KIA)
+│   ├── memories.json
+│   ├── state.json             project phase, owner, design defaults
+│   ├── archive.json
+│   ├── digests.json
+│   ├── checkpoints/
+│   └── tickets/
+│       ├── _index.json
+│       ├── TK-<id>.md         the spec
+│       ├── TK-<id>-submit.md  dev submission
+│       ├── TK-<id>-review.md  QA / reviewer verdict
+│       └── closed/
 ```
 
-If an existing config file is present, the installer leaves it alone and prints the template path to merge manually.
+Everything is plain text or JSON. You can `cat` your way through the
+project's full history. No vector DB lock-in, no opaque embeddings — just
+files an audit can read.
 
-After installing, run `memory_doctor` from your MCP client to check project-local hooks, rules, runtime memory, and ignored paths.
+---
 
-## Agent Workflow
+## What's already shipped (v3.5.2, 2026-05-09)
 
-First time in a new project:
+On Board has been iterating in production with weekly releases for the
+last ~4 weeks. Highlights from the CHANGELOG:
 
-```text
-memory_init(description="My project", tech_stack="React/Node")
-memory_onboard(agent_name="claude-main", agent_platform="claude")
-```
+- **v3.5.x** — One-call `memory_onboard`, XML protocol tags, `memory_links`,
+  data-integrity `memory_doctor`, pytest workflow harness, `uv` install
+- **v3.2** — Briefing modes (brief/normal/deep/handoff-only), opt-in local
+  vector search, ranked memory_search
+- **v3.1** — Ticket schema enforcement (`target_url`, `scope`,
+  `required_fields`), agent rejoin dedup
+- **v3.0** — Live dashboard (agent grouping, platform colors, orphan
+  ticket detection, idle indicators), heartbeat tracking, idle auto-KIA
+- **Always** — First-class on every platform with an MCP client (Claude
+  Desktop, Claude Code, Cursor, Codex, AntiGravity)
+- **Parallel agent dispatch** — three dev tracks + a separate QA squad
+  run concurrently (see pitch deck Gantt). Practical ceiling is "how
+  many AI clients can your machine run at once" — on M4 MacBook Pro
+  that's a small number, not a protocol-side problem.
+- **Role / ticket templates** — opus-testcase, dev-track-N, Jonhny-tester,
+  desktop-opus, plus acceptance-test patterns and ticket schema. Working
+  in the case study since v1. Not yet packaged for outside drop-in use,
+  but the role names and ticket schema are documented enough that you
+  can replicate with your own prompts. **Recommended for best result**.
 
-First time in an existing project:
+Full CHANGELOG: [CHANGELOG.md](./CHANGELOG.md).
 
-```text
-memory_bootstrap(agent_name="claude-onboard", description="My project", tech_stack="React/Node")
-```
+## Wishlist (no dates, maintained at the pace of personal use)
 
-Every later agent:
+> **Honest note.** On Board is maintained at the pace of my own daily use.
+> I use it constantly, so bugs get fixed fast and features that scratch
+> my own itch ship quickly — usually weekly. The list below is what I'd
+> *like* to see, in rough priority order. It is **not a roadmap with
+> dates** because I'm one person and I can't commit them. If you want
+> a specific feature, the fastest path is to **open an issue or send a
+> PR** — I review them.
 
-```text
-memory_onboard(agent_name="codex-main", agent_platform="codex", mode="normal")
-memory_write(...)
-memory_checkpoint(...)
-memory_handoff(...)
-```
+- **Cross-project memory federation** — one agent crew across multiple repos
+- **A2A protocol adapter** (read-mostly Task/AgentCard projection)
+- **Public release of the role/ticket templates** — they already exist
+  and have been used in the case study since v1; they just haven't been
+  packaged as a clean drop-in kit for outside users. **Recommended
+  for best result** if you replicate the loop.
+- **Interactive operator web console** (distinct from the current
+  observability dashboard) — claim/review tickets from a browser/phone
 
-Briefing modes:
+That's the list. Things deliberately omitted: hosted version /
+commercial tier / template marketplace — those depend on community
+demand that doesn't exist yet, and I'd rather under-promise.
 
-- `brief` - fast catchup with the latest handoff and highest-signal memory
-- `normal` - default onboarding
-- `deep` - broader project history when context is unclear
-- `handoff-only` - fastest transfer check
+**Explicitly NOT on the wishlist:**
 
-For ticket work, use `memory_get_briefing(ticket_id="TK-...")` to include the ticket spec and related memories.
-Use `memory_links(ticket_id="TK-...")` to inspect ticket, memory, file, agent, and tag linkage.
-Use `memory_onboard(ticket_id="TK-...")` when starting a session for a specific ticket.
+- ❌ Charging for the MCP server. Ever.
+- ❌ Feature-gating the OSS version.
+- ❌ Locking agent definitions to a vendor.
+- ❌ Promising dated deliverables I can't commit to.
+- ❌ Hosted SaaS / commercial offering (today). Maybe later if community
+   demand justifies the effort — but I won't put it on a roadmap until
+   that demand is real.
 
-Use stable agent names such as `claude-main`, `cursor-coder`, or `codex-main`. Keep the same name across sessions; do not put dates, model names, or session IDs in `agent_name`.
+---
 
-## Ticket Workflow
+## How to help
 
-Use tickets when work needs to move between agents. Ticket mutations require the agent to be on board first:
+The whole point of this launch is to see what other people build with
+the loop. If that sounds like something you want to be part of:
 
-- `memory_create_ticket` - request help or assign work
-- `memory_claim_ticket` - pick up assigned or open work
-- `memory_submit_ticket` - submit completed work for review
-- `memory_review_ticket` - approve or reject submitted work
-- `memory_cancel_ticket` - cancel a ticket you created
-- `memory_terminate_ticket` - force-close a ticket you created
-- `memory_list_tickets` - inspect open, claimed, submitted, and closed tickets
+- **★ Star the repo** if you think multi-agent dev with a QA gate should
+  be a thing more people try.
+- **Run the loop on your own project.** Clone, point at a repo, onboard
+  your first agent. README has the 10-minute quick start. If you hit
+  something weird, open an issue.
+- **Share the case study.** The [pitch deck](./docs/pitch.html) is the
+  shortest path to explaining the loop to someone who hasn't seen it.
+- **Cover it.** If you write for a publication, newsletter, or podcast
+  about AI tooling: there's a [free press kit](./docs/press-kit-en.md)
+  (English + Thai) with citable numbers, pre-written paragraphs, quotes,
+  and screenshots — all cleared for editorial use.
+- **Build on it.** Apache-2.0. Fork, modify, ship. If you build something
+  interesting, open an issue or DM.
 
-## Tools
-
-On Board currently exposes 29 MCP tools.
-
-Core:
-`memory_init`, `memory_bootstrap`, `memory_onboard`, `memory_agent_join`, `memory_get_briefing`, `memory_status`, `memory_doctor`, `memory_handoff`
-
-Memory:
-`memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links`, `memory_pin`
-
-State and context:
-`memory_checkpoint`, `memory_update_state`, `memory_context_dirs`, `memory_context_read`
-
-Compaction:
-`memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive`
-
-Recommended compaction flow: run `memory_token_usage`, review old entries with `memory_prepare_compaction`, then run `memory_compact(use_llm=false)` when the preview looks safe.
-
-Tickets:
-`memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets`
-
-## Runtime Data
-
-`.agent-mem/` contains project memory:
-
-```text
-.agent-mem/
-├── project.json
-├── agents.json
-├── memories.json
-├── state.json
-├── archive.json
-├── digests.json
-├── checkpoints/
-└── tickets/
-```
-
-## Environment
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `AGENT_PROJECT_DIR` | cwd | Project root path |
-| `AGENT_MEM_CONTEXT_DIRS` | empty | Colon-separated external context directories |
-| `AGENT_MEM_HOT_HOURS` | 24 | Hours to keep full-detail hot memory |
-| `AGENT_MEM_MAX_HOT` | 50 | Max hot memory entries |
-| `AGENT_MEM_IDLE_KIA_MIN` | 30 | Minutes before idle active agents are marked KIA |
-| `AGENT_MEM_VECTOR_BACKEND` | none | Optional vector-style search backend: `none` or `local` |
-
-## Updating
-
-```bash
-bash update.sh
-```
-
-Restart clients after updating MCP server config or hook/rule files.
-
-## Testing
-
-With `uv`:
-
-```bash
-uv sync --extra test
-uv run python -m pytest tests -q
-```
-
-With an existing venv:
-
-```bash
-./venv/bin/python -m pip install -e ".[test]"
-./venv/bin/python -m pytest tests -q
-```
+---
 
 ## License
 
-Apache-2.0
+Apache-2.0. Free to use, fork, modify, redistribute, build commercial
+products on. No restrictions on use.
+
+---
+
+## Credits
+
+Built by Swiss P. — solo operator, with a multi-agent crew running on
+Claude Pro + Antigravity + this MCP server.
+
+The case-study production app is a personal side business; the public
+URL is withheld for personal reasons. Sanitized screenshots and a
+private walkthrough are available on request.
+
+To read about the loop from the outside, the pitch deck is the fastest
+path: [docs/pitch.html](./docs/pitch.html).
+
+**Press / media inquiries**: [docs/press-kit-en.md](./docs/press-kit-en.md)
+· DM on X · contact details in the press kit.
+
+**Contributors welcome.** Open an issue or PR. If you're not sure where
+to start, the README mention of "Q3 templates" is the area that needs
+the most early collaborators.
