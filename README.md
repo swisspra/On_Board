@@ -135,7 +135,7 @@ recent memory, and the protocol it should follow. Every subsequent action
 is stamped with its identity.
 
 Full client setup (Claude Desktop, Cursor, Codex, AntiGravity): see
-[docs/SETUP.md](./docs/SETUP.md).
+[SETUP.md](.SETUP.md).
 
 ---
 
@@ -178,7 +178,7 @@ end, not in the middle.
 | **Project context** | `memory_init`, `memory_bootstrap`, `memory_status`, `memory_doctor`, `memory_update_state`, `memory_context_dirs`, `memory_context_read` |
 | **Compaction** | `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive` |
 
-Full reference: [docs/TOOLS.md](./docs/TOOLS.md).
+Full reference: [TOOLS.md](.TOOLS.md).
 
 ---
 
@@ -229,7 +229,7 @@ below). Mapping when shipped:
   is non-terminal and retry-friendly; A2A REJECTED is terminal)
 
 On Board would expose A2A as an output format, not an input format. The
-MCP session gate would remain the entry point. See [docs/ideas/ideas.txt](./docs/ideas/ideas.txt)
+MCP session gate would remain the entry point.
 for the full design discussion.
 
 ---
@@ -287,60 +287,6 @@ last ~4 weeks. Highlights from the CHANGELOG:
 
 Full CHANGELOG: [CHANGELOG.md](./CHANGELOG.md).
 
-## Wishlist (no dates, maintained at the pace of personal use)
-
-> **Honest note.** On Board is maintained at the pace of my own daily use.
-> I use it constantly, so bugs get fixed fast and features that scratch
-> my own itch ship quickly — usually weekly. The list below is what I'd
-> *like* to see, in rough priority order. It is **not a roadmap with
-> dates** because I'm one person and I can't commit them. If you want
-> a specific feature, the fastest path is to **open an issue or send a
-> PR** — I review them.
-
-- **Cross-project memory federation** — one agent crew across multiple repos
-- **A2A protocol adapter** (read-mostly Task/AgentCard projection)
-- **Public release of the role/ticket templates** — they already exist
-  and have been used in the case study since v1; they just haven't been
-  packaged as a clean drop-in kit for outside users. **Recommended
-  for best result** if you replicate the loop.
-- **Interactive operator web console** (distinct from the current
-  observability dashboard) — claim/review tickets from a browser/phone
-
-That's the list. Things deliberately omitted: hosted version /
-commercial tier / template marketplace — those depend on community
-demand that doesn't exist yet, and I'd rather under-promise.
-
-**Explicitly NOT on the wishlist:**
-
-- ❌ Charging for the MCP server. Ever.
-- ❌ Feature-gating the OSS version.
-- ❌ Locking agent definitions to a vendor.
-- ❌ Promising dated deliverables I can't commit to.
-- ❌ Hosted SaaS / commercial offering (today). Maybe later if community
-   demand justifies the effort — but I won't put it on a roadmap until
-   that demand is real.
-
----
-
-## How to help
-
-The whole point of this launch is to see what other people build with
-the loop. If that sounds like something you want to be part of:
-
-- **★ Star the repo** if you think multi-agent dev with a QA gate should
-  be a thing more people try.
-- **Run the loop on your own project.** Clone, point at a repo, onboard
-  your first agent. README has the 10-minute quick start. If you hit
-  something weird, open an issue.
-- **Share the case study.** The [pitch deck](./docs/pitch.html) is the
-  shortest path to explaining the loop to someone who hasn't seen it.
-- **Cover it.** If you write for a publication, newsletter, or podcast
-  about AI tooling: there's a [free press kit](./docs/press-kit-en.md)
-  (English + Thai) with citable numbers, pre-written paragraphs, quotes,
-  and screenshots — all cleared for editorial use.
-- **Build on it.** Apache-2.0. Fork, modify, ship. If you build something
-  interesting, open an issue or DM.
-
 ---
 
 ## License
@@ -349,22 +295,5 @@ Apache-2.0. Free to use, fork, modify, redistribute, build commercial
 products on. No restrictions on use.
 
 ---
-
-## Credits
-
-Built by Swiss P. — solo operator, with a multi-agent crew running on
-Claude Pro + Antigravity + this MCP server.
-
-The case-study production app is a personal side business; the public
-URL is withheld for personal reasons. Sanitized screenshots and a
-private walkthrough are available on request.
-
-To read about the loop from the outside, the pitch deck is the fastest
-path: [docs/pitch.html](./docs/pitch.html).
-
-**Press / media inquiries**: [docs/press-kit-en.md](./docs/press-kit-en.md)
-· DM on X · contact details in the press kit.
-
-**Contributors welcome.** Open an issue or PR. If you're not sure where
 to start, the README mention of "Q3 templates" is the area that needs
 the most early collaborators.
