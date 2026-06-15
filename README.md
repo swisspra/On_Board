@@ -66,7 +66,7 @@ $60/month total stack cost · 0 lines of code typed by the human
 
 The full case study with screenshots, cost breakdown, and a worked example
 of a real ORM bug the QA loop caught (Drizzle correlated subquery → 25
-active minutes from bug report to deployed fix) is in the **[pitch deck](./docs/pitch.html)**.
+active minutes from bug report to deployed fix) is in the xx.
 
 ## Who this is for
 
