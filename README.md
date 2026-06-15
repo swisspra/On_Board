@@ -28,7 +28,7 @@ AI agents run it.
 
 ## Why this exists
 
-I built this because I got sick of three things:
+I built this because
 
 1. **Every new chat is amnesia.** I was re-explaining the codebase, the
    conventions, and "the bug we already fixed last Tuesday" to every new
@@ -66,7 +66,7 @@ $60/month total stack cost · 0 lines of code typed by the human
 
 The full case study with screenshots, cost breakdown, and a worked example
 of a real ORM bug the QA loop caught (Drizzle correlated subquery → 25
-active minutes from bug report to deployed fix) is in the xx.
+active minutes from bug report to deployed fix) by requested.
 
 ## Who this is for
 
