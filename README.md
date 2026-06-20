@@ -38,7 +38,7 @@ I built this because
    pair of eyes. Bugs shipped because the same agent never caught its
    own mistakes.
 
-3. **My Claude Pro quota was the bottleneck**, not the work. I had three
+3. **My Claude Desktop Pro quota was the bottleneck**, not the work. I had three
    Pro accounts sitting idle while one throttled.
 
 On Board fixes all three:
