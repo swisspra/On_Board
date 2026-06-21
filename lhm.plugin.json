@@ -1,0 +1,163 @@
+{
+  "identifier": "swisspra-on_board",
+  "name": "On Board — Cross-Platform Agent Shared Memory MCP",
+  "description": "On Board is a local-first MCP server for multi-agent project coordination. It gives Claude Desktop, Claude Code, Codex, Cursor, and AntiGravity one shared project memory, a ticket queue, and a review gate backed by plain files in .agent-mem/.",
+  "author": "swisspra",
+  "authorUrl": "https://github.com/swisspra",
+  "homepage": "https://github.com/swisspra/On_Board",
+  "repository": "https://github.com/swisspra/On_Board",
+  "version": "3.5.2",
+  "category": "developer",
+  "tags": [
+    "mcp",
+    "shared-memory",
+    "multi-agent",
+    "ai-agents",
+    "developer-tools",
+    "ticketing",
+    "review-workflow",
+    "python",
+    "uv",
+    "local-first"
+  ],
+  "locale": "en-US",
+  "server": {
+    "type": "stdio",
+    "command": "uv",
+    "args": [
+      "run",
+      "--directory",
+      "/full/path/to/On_Board",
+      "python",
+      "server.py"
+    ],
+    "env": {
+      "AGENT_PROJECT_DIR": "/full/path/to/your/project",
+      "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
+    }
+  },
+  "tools": [
+    {
+      "name": "memory_onboard",
+      "description": "Join an agent session and receive the project briefing in one call."
+    },
+    {
+      "name": "memory_agent_join",
+      "description": "Register or rejoin an active agent session."
+    },
+    {
+      "name": "memory_get_briefing",
+      "description": "Read project context, recent memory, handoffs, and open work."
+    },
+    {
+      "name": "memory_handoff",
+      "description": "Write a structured handoff before ending an agent session."
+    },
+    {
+      "name": "memory_checkpoint",
+      "description": "Save mid-work state, blockers, branch, and remaining tasks."
+    },
+    {
+      "name": "memory_write",
+      "description": "Write durable project memory stamped with agent identity."
+    },
+    {
+      "name": "memory_read",
+      "description": "Read recent memory with filters for type, tag, agent, and time window."
+    },
+    {
+      "name": "memory_search",
+      "description": "Search active memory with ranked keyword matching."
+    },
+    {
+      "name": "memory_search_vector",
+      "description": "Run local vector-style memory search."
+    },
+    {
+      "name": "memory_links",
+      "description": "Show links between memories, tickets, files, and agents."
+    },
+    {
+      "name": "memory_pin",
+      "description": "Pin or unpin important memory entries."
+    },
+    {
+      "name": "memory_create_ticket",
+      "description": "Create a cross-agent work ticket with target URL, scope, and required artifacts."
+    },
+    {
+      "name": "memory_claim_ticket",
+      "description": "Claim a ticket so parallel agents do not duplicate work."
+    },
+    {
+      "name": "memory_submit_ticket",
+      "description": "Submit ticket work for review with summary and changed files."
+    },
+    {
+      "name": "memory_review_ticket",
+      "description": "Approve or reject submitted ticket work with concrete review notes."
+    },
+    {
+      "name": "memory_list_tickets",
+      "description": "List open, assigned, submitted, closed, or rejected tickets."
+    },
+    {
+      "name": "memory_cancel_ticket",
+      "description": "Cancel a ticket that should no longer be done."
+    },
+    {
+      "name": "memory_terminate_ticket",
+      "description": "Force-terminate a ticket when normal workflow cannot continue."
+    },
+    {
+      "name": "memory_init",
+      "description": "Initialize .agent-mem/ for a new project."
+    },
+    {
+      "name": "memory_bootstrap",
+      "description": "Bootstrap memory for an existing project by scanning common project files."
+    },
+    {
+      "name": "memory_status",
+      "description": "Show project, agent, memory, and ticket status."
+    },
+    {
+      "name": "memory_doctor",
+      "description": "Check project setup and memory data integrity."
+    },
+    {
+      "name": "memory_update_state",
+      "description": "Update small shared project state values."
+    },
+    {
+      "name": "memory_context_dirs",
+      "description": "List external context directories from AGENT_MEM_CONTEXT_DIRS."
+    },
+    {
+      "name": "memory_context_read",
+      "description": "Read files from configured external context directories."
+    },
+    {
+      "name": "memory_prepare_compaction",
+      "description": "Preview old memory entries before compaction."
+    },
+    {
+      "name": "memory_compact",
+      "description": "Archive older memory entries after a digest exists."
+    },
+    {
+      "name": "memory_token_usage",
+      "description": "Estimate memory and briefing token usage."
+    },
+    {
+      "name": "memory_search_archive",
+      "description": "Search archived memory after compaction."
+    }
+  ],
+  "prompts": [
+    {
+      "name": "on-board",
+      "description": "Join the project and get the full briefing; run this first."
+    }
+  ]
+}

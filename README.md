@@ -136,7 +136,7 @@ recent memory, and the protocol it should follow. Every subsequent action
 is stamped with its identity.
 
 Full client setup (Claude Desktop, Cursor, Codex, AntiGravity): see
-[SETUP.md](.SETUP.md).
+[docs/SETUP.md](./docs/SETUP.md).
 
 ---
 
@@ -179,7 +179,7 @@ end, not in the middle.
 | **Project context** | `memory_init`, `memory_bootstrap`, `memory_status`, `memory_doctor`, `memory_update_state`, `memory_context_dirs`, `memory_context_read` |
 | **Compaction** | `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive` |
 
-Full reference: [TOOLS.md](.TOOLS.md).
+Full reference: [docs/TOOLS.md](./docs/TOOLS.md).
 
 ---
 
