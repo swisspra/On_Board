@@ -7,6 +7,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)]()
 [![A2A interop](https://img.shields.io/badge/A2A-adapter%20on%20roadmap-8ea0c2)]()
+[![MCP Badge](https://lobehub.com/badge/mcp/swisspra-on_board)](https://lobehub.com/mcp/swisspra-on_board)
 
 ---
 
