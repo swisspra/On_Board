@@ -19,7 +19,9 @@ CLAUDE.md
 AGENTS.md
 
 # Development
-docs/
+docs/*
+!docs/SETUP.md
+!docs/TOOLS.md
 .cursorrules
 *.original.md
 *.original.*
