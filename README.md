@@ -89,9 +89,10 @@ Each `setup-project.sh` run also registers the project locally in
 gitignored and only helps updates remember which projects point here.
 
 The setup script uses `uv sync --inexact` to install/update dependencies without
-pruning local test/dev extras, but the MCP runtime uses `.venv/bin/python
-server.py`. This avoids startup timeouts when your client loads several MCP
-servers at once.
+pruning local test/dev extras. MCP clients use `onboard-server.sh`, which runs
+the local `.venv` directly and rebuilds it only if the venv is missing. This
+keeps normal startup fast, avoids `uv run` startup timeouts, and makes a shared
+central checkout more durable.
 
 On Board does not write memory from end-turn hooks. Current `Stop` hooks in
 several agent clients run every turn, which creates noisy memory and can force
@@ -231,8 +232,8 @@ project-selected memory folder:
   dashboard launcher.
 - Linked-project registry tracks which projects point at the central checkout,
   so updates can refresh known projects without scanning the machine.
-- Runtime startup uses `.venv/bin/python server.py` instead of `uv run` to avoid
-  MCP startup timeouts when many local servers load at once.
+- Runtime startup uses `onboard-server.sh`, which normally execs `.venv/bin/python
+  server.py` and only falls back to `uv sync --inexact` if `.venv` is missing.
 - Startup hooks return a small read-only briefing. End-turn/Stop hooks are not
   installed by default because current clients can run them too often.
 - The dashboard is local and read-only.

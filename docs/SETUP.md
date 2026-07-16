@@ -87,10 +87,8 @@ The config will look like this, with real paths filled in:
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/full/path/to/On_Board/.venv/bin/python",
-      "args": [
-        "/full/path/to/On_Board/server.py"
-      ],
+      "command": "/full/path/to/On_Board/onboard-server.sh",
+      "args": [],
       "env": {
         "AGENT_PROJECT_DIR": "/full/path/to/your/project",
         "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
@@ -101,11 +99,11 @@ The config will look like this, with real paths filled in:
 ```
 
 This is the recommended local setup: install/update with `uv sync --inexact`,
-run with the pinned Python inside `.venv`. `--inexact` keeps any already
-installed development extras, such as pytest, instead of pruning the environment
-back to runtime-only dependencies. Avoid using `uv run` or `uvx` as the daily
-MCP startup command when your client loads many MCP servers; they can add enough
-startup work to hit client timeouts.
+then let `onboard-server.sh` run the pinned Python inside `.venv`. `--inexact`
+keeps any already installed development extras, such as pytest, instead of
+pruning the environment back to runtime-only dependencies. Avoid using `uv run`
+or `uvx` as the daily MCP startup command when your client loads many MCP
+servers; they can add enough startup work to hit client timeouts.
 
 `AGENT_PROJECT_DIR` is required. It tells On Board which project owns the `.agent-mem/` memory folder.
 
@@ -243,8 +241,8 @@ Add this MCP server to your client, replacing both paths:
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/full/path/to/On_Board/.venv/bin/python",
-      "args": ["/full/path/to/On_Board/server.py"],
+      "command": "/full/path/to/On_Board/onboard-server.sh",
+      "args": [],
       "env": {
         "AGENT_PROJECT_DIR": "/full/path/to/your/project"
       }

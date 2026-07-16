@@ -77,6 +77,8 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     control = project / ".onboard" / "AGENT_CONTROL.md"
     dashboard = project / ".onboard" / "run-dashboard.sh"
     registry_data = json.loads(registry.read_text(encoding="utf-8"))
+    generated_config = json.loads(generated.read_text(encoding="utf-8"))
+    server_config = generated_config["mcpServers"]["agent-memory"]
 
     assert generated.exists()
     assert control.exists()
@@ -89,6 +91,8 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     assert "Checking linked project" in linked_doctor.stdout
     assert registry_data["projects"][0]["path"] == str(project)
     assert registry_data["projects"][0]["hook_mode"] == "safe"
+    assert server_config["command"] == str(REPO_ROOT / "onboard-server.sh")
+    assert server_config["args"] == []
     assert "setup-project.sh" in control.read_text(encoding="utf-8")
     assert str(project) in control.read_text(encoding="utf-8")
     assert str(project) in dashboard.read_text(encoding="utf-8")

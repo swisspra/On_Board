@@ -141,6 +141,10 @@ find_onboard_python() {
     fi
 }
 
+find_onboard_launcher() {
+    printf "%s\n" "$SCRIPT_DIR/onboard-server.sh"
+}
+
 list_linked_projects() {
     python3 - "$REGISTRY_FILE" <<'PY'
 import json
@@ -248,12 +252,14 @@ fi
 
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"
 ONBOARD_PY="$(find_onboard_python)"
+ONBOARD_LAUNCHER="$(find_onboard_launcher)"
 
 echo "Project: $PROJECT_DIR"
 echo ""
 
 echo "Runtime"
 check_executable "$ONBOARD_PY" "On Board Python: $ONBOARD_PY"
+check_executable "$ONBOARD_LAUNCHER" "On Board launcher: $ONBOARD_LAUNCHER"
 check_file "$SCRIPT_DIR/server.py" "On Board server.py"
 
 TOOLS=$(PYTHONPATH="$SCRIPT_DIR" "$ONBOARD_PY" -c "
@@ -330,7 +336,7 @@ else
 fi
 
 if [ -f "$MCP_JSON" ] && [ -x "$ONBOARD_PY" ]; then
-    if CONFIG_CHECK=$(PYTHONPATH="$SCRIPT_DIR" "$ONBOARD_PY" - "$MCP_JSON" "$SCRIPT_DIR" "$PROJECT_DIR" "$ONBOARD_PY" <<'PY' 2>&1
+    if CONFIG_CHECK=$(PYTHONPATH="$SCRIPT_DIR" "$ONBOARD_PY" - "$MCP_JSON" "$SCRIPT_DIR" "$PROJECT_DIR" "$ONBOARD_PY" "$ONBOARD_LAUNCHER" <<'PY' 2>&1
 import json
 import sys
 from pathlib import Path
@@ -339,13 +345,26 @@ config_path = Path(sys.argv[1])
 onboard = Path(sys.argv[2])
 project = Path(sys.argv[3])
 python = Path(sys.argv[4])
+launcher = Path(sys.argv[5])
 
 cfg = json.loads(config_path.read_text(encoding="utf-8"))
 srv = cfg["mcpServers"]["agent-memory"]
 
+command = srv.get("command")
+args = srv.get("args")
+if command == str(launcher):
+    command_ok = True
+    args_ok = args in (None, [])
+elif command == str(python):
+    command_ok = True
+    args_ok = args == [str(onboard / "server.py")]
+else:
+    command_ok = False
+    args_ok = False
+
 checks = [
-    ("command", srv.get("command") == str(python), srv.get("command")),
-    ("server.py", srv.get("args") == [str(onboard / "server.py")], srv.get("args")),
+    ("command", command_ok, command),
+    ("args", args_ok, args),
     ("AGENT_PROJECT_DIR", srv.get("env", {}).get("AGENT_PROJECT_DIR") == str(project), srv.get("env", {}).get("AGENT_PROJECT_DIR")),
 ]
 

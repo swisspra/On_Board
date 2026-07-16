@@ -171,6 +171,7 @@ find_onboard_python() {
 }
 
 ONBOARD_PY="$(find_onboard_python)"
+ONBOARD_SERVER="$SCRIPT_DIR/onboard-server.sh"
 
 python3 - "$PROJECT_DIR" "$MIGRATION_SNAPSHOT" <<'PY'
 import hashlib
@@ -501,7 +502,7 @@ fi
 ONBOARD_DIR="$PROJECT_DIR/.onboard"
 mkdir -p "$ONBOARD_DIR"
 
-"$ONBOARD_PY" - "$SCRIPT_DIR" "$PROJECT_DIR" "$ONBOARD_DIR" "$ONBOARD_PY" "$HOOK_MODE" <<'PY'
+"$ONBOARD_PY" - "$SCRIPT_DIR" "$PROJECT_DIR" "$ONBOARD_DIR" "$ONBOARD_PY" "$ONBOARD_SERVER" "$HOOK_MODE" <<'PY'
 import json
 import shlex
 import sys
@@ -511,11 +512,12 @@ onboard = Path(sys.argv[1]).resolve()
 project = Path(sys.argv[2]).resolve()
 out_dir = Path(sys.argv[3]).resolve()
 python = Path(sys.argv[4])
-hook_mode = sys.argv[5]
+launcher = Path(sys.argv[5])
+hook_mode = sys.argv[6]
 
 server = {
-    "command": str(python),
-    "args": [str(onboard / "server.py")],
+    "command": str(launcher),
+    "args": [],
     "env": {
         "AGENT_PROJECT_DIR": str(project)
     }
@@ -568,7 +570,13 @@ On Board is installed once at:
 {onboard}
 ```
 
-Runtime Python:
+Runtime launcher:
+
+```text
+{launcher}
+```
+
+Cached runtime Python:
 
 ```text
 {python}

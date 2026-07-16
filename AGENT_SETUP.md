@@ -117,8 +117,8 @@ Then ask them to add this MCP server manually:
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/path/to/On_Board/.venv/bin/python",
-      "args": ["/path/to/On_Board/server.py"],
+      "command": "/path/to/On_Board/onboard-server.sh",
+      "args": [],
       "env": {
         "AGENT_PROJECT_DIR": "/path/to/project"
       }
@@ -173,12 +173,15 @@ need their own dashboard copy.
 ## Important Runtime Rule
 
 Use `uv sync --inexact` for install/update. `--inexact` avoids pruning already
-installed dev/test extras from `.venv`. Use the pinned Python inside `.venv` for
-MCP runtime:
+installed dev/test extras from `.venv`. Use the tracked launcher for MCP runtime:
 
 ```text
-/path/to/On_Board/.venv/bin/python /path/to/On_Board/server.py
+/path/to/On_Board/onboard-server.sh
 ```
+
+The launcher normally execs `.venv/bin/python server.py`. If `.venv` is missing
+after a clone/update/cleanup, it runs `uv sync --inexact` once and then starts
+the server.
 
 Do not use `uvx` or `uv run` as the default daily MCP startup command when the
 user has many local MCP servers. It can be slow enough to trigger client startup
@@ -209,8 +212,8 @@ bash /path/to/On_Board/doctor.sh /path/to/project
 If the MCP client still cannot see tools, check that its config uses:
 
 ```text
-command = /path/to/On_Board/.venv/bin/python
-args    = /path/to/On_Board/server.py
+command = /path/to/On_Board/onboard-server.sh
+args    = []
 env     = AGENT_PROJECT_DIR=/path/to/project
 ```
 
