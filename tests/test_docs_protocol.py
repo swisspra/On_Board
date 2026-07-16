@@ -129,7 +129,7 @@ def test_release_materials_match_current_version():
     assert re.search(r'^version = "3\.6\.0"$', pyproject, re.MULTILINE)
     assert first_header.startswith("## v3.6.0")
     assert "Safer Setup And Updates" in first_header
-    for expected in ["linked-projects.json", "--refresh-linked", ".venv/bin/python", "startup mini-brief"]:
+    for expected in ["linked-projects.json", "--refresh-linked", "onboard_server.py", "startup mini-brief"]:
         assert expected in release_notes
 
 
@@ -142,7 +142,7 @@ def test_uv_install_docs_and_template_are_present():
 
     assert "uv sync" in readme
     assert "uv sync --inexact" in readme
-    assert "onboard-server.sh" in readme
+    assert "onboard_server.py" in readme
     assert ".venv/bin/python" in readme
     assert "startup timeouts" in readme
     assert "Option 1: Agent setup" in readme
@@ -163,8 +163,8 @@ def test_uv_install_docs_and_template_are_present():
     assert "Do not use turn-scoped `Stop`" in agent_setup
     assert "uvx" in agent_setup
     assert "uvx" not in template
-    assert '"command": "/full/path/to/On_Board/onboard-server.sh"' in template
-    assert '"args": []' in template
+    assert '"command": "python3"' in template
+    assert "/full/path/to/On_Board/onboard_server.py" in template
     assert '"command": "uv"' in uv_run_template
     assert '"--directory"' in uv_run_template
     assert "AGENT_MEM_CONTEXT_DIRS" in readme

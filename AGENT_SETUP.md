@@ -117,8 +117,8 @@ Then ask them to add this MCP server manually:
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/path/to/On_Board/onboard-server.sh",
-      "args": [],
+      "command": "python3",
+      "args": ["/path/to/On_Board/onboard_server.py"],
       "env": {
         "AGENT_PROJECT_DIR": "/path/to/project"
       }
@@ -176,7 +176,7 @@ Use `uv sync --inexact` for install/update. `--inexact` avoids pruning already
 installed dev/test extras from `.venv`. Use the tracked launcher for MCP runtime:
 
 ```text
-/path/to/On_Board/onboard-server.sh
+python3 /path/to/On_Board/onboard_server.py
 ```
 
 The launcher normally execs `.venv/bin/python server.py`. If `.venv` is missing
@@ -212,8 +212,8 @@ bash /path/to/On_Board/doctor.sh /path/to/project
 If the MCP client still cannot see tools, check that its config uses:
 
 ```text
-command = /path/to/On_Board/onboard-server.sh
-args    = []
+command = python3
+args    = /path/to/On_Board/onboard_server.py
 env     = AGENT_PROJECT_DIR=/path/to/project
 ```
 

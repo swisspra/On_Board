@@ -16,7 +16,7 @@
 - `setup-project.sh` now generates `.onboard/` project config, `AGENT_CONTROL.md`, and a project dashboard launcher
 - `update.sh` now skips unrelated folders, backs up overwritten files, and requires an explicit refresh for linked projects
 - Linked project refresh preserves each project's registered hook mode
-- Default MCP runtime now uses `.venv/bin/python server.py` instead of `uv run`
+- Default MCP runtime now uses `python3 onboard_server.py`, which normally runs `.venv/bin/python server.py` and rebuilds `.venv` only if missing
 - Startup hooks now return a small read-only briefing; legacy stop/end-turn hooks no longer write memory
 - Agent roles and ticket controls were expanded for parallel worker/tester/reviewer flows
 

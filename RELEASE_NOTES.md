@@ -10,7 +10,7 @@ many projects.
 - Added `doctor.sh --list-linked` and `doctor.sh --all-linked`.
 - Added `update.sh --list-linked` and `update.sh --refresh-linked`.
 - Made `update.sh` safer: it skips unrelated folders, backs up overwritten files, and does not refresh project files unless explicitly requested.
-- Reworked setup around local `.venv/bin/python server.py` startup to avoid `uv run` startup timeouts when many MCP servers load together.
+- Reworked setup around `python3 onboard_server.py`, a tracked launcher path that normally runs the local `.venv` directly and rebuilds it only if missing.
 - Replaced noisy end-turn hooks with lightweight startup mini-brief hooks.
 - Expanded agent roles and ticket controls for multi-agent workflows.
 

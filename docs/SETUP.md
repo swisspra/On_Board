@@ -87,8 +87,10 @@ The config will look like this, with real paths filled in:
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/full/path/to/On_Board/onboard-server.sh",
-      "args": [],
+      "command": "python3",
+      "args": [
+        "/full/path/to/On_Board/onboard_server.py"
+      ],
       "env": {
         "AGENT_PROJECT_DIR": "/full/path/to/your/project",
         "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
@@ -99,7 +101,7 @@ The config will look like this, with real paths filled in:
 ```
 
 This is the recommended local setup: install/update with `uv sync --inexact`,
-then let `onboard-server.sh` run the pinned Python inside `.venv`. `--inexact`
+then let `onboard_server.py` run the pinned Python inside `.venv`. `--inexact`
 keeps any already installed development extras, such as pytest, instead of
 pruning the environment back to runtime-only dependencies. Avoid using `uv run`
 or `uvx` as the daily MCP startup command when your client loads many MCP
@@ -241,8 +243,8 @@ Add this MCP server to your client, replacing both paths:
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/full/path/to/On_Board/onboard-server.sh",
-      "args": [],
+      "command": "python3",
+      "args": ["/full/path/to/On_Board/onboard_server.py"],
       "env": {
         "AGENT_PROJECT_DIR": "/full/path/to/your/project"
       }

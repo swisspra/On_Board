@@ -299,6 +299,8 @@ for DEST in "${TARGETS[@]}"; do
     chmod +x "$DEST/doctor.sh" 2>/dev/null || true
     copy_file_if_present "$SCRIPT_DIR/onboard-server.sh" "$DEST/onboard-server.sh"
     chmod +x "$DEST/onboard-server.sh" 2>/dev/null || true
+    copy_file_if_present "$SCRIPT_DIR/onboard_server.py" "$DEST/onboard_server.py"
+    chmod +x "$DEST/onboard_server.py" 2>/dev/null || true
     copy_file_if_present "$SCRIPT_DIR/README.md" "$DEST/README.md"
     copy_file_if_present "$SCRIPT_DIR/RELEASE_NOTES.md" "$DEST/RELEASE_NOTES.md"
     copy_file_if_present "$SCRIPT_DIR/CHANGELOG.md" "$DEST/CHANGELOG.md"

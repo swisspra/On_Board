@@ -91,8 +91,8 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     assert "Checking linked project" in linked_doctor.stdout
     assert registry_data["projects"][0]["path"] == str(project)
     assert registry_data["projects"][0]["hook_mode"] == "safe"
-    assert server_config["command"] == str(REPO_ROOT / "onboard-server.sh")
-    assert server_config["args"] == []
+    assert server_config["command"] == "python3"
+    assert server_config["args"] == [str(REPO_ROOT / "onboard_server.py")]
     assert "setup-project.sh" in control.read_text(encoding="utf-8")
     assert str(project) in control.read_text(encoding="utf-8")
     assert str(project) in dashboard.read_text(encoding="utf-8")

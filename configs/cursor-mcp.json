@@ -1,8 +1,10 @@
 {
   "mcpServers": {
     "agent-memory": {
-      "command": "/full/path/to/On_Board/onboard-server.sh",
-      "args": [],
+      "command": "python3",
+      "args": [
+        "/full/path/to/On_Board/onboard_server.py"
+      ],
       "env": {
         "AGENT_PROJECT_DIR": "${workspaceFolder}"
       }
