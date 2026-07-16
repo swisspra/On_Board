@@ -1,20 +1,25 @@
-# v3.5.2 — Context Dir Template
+# v3.6.0 — Safer Setup And Updates
 
-Small patch release for projects that use external context directories.
+This release makes On Board easier to run as one central MCP checkout shared by
+many projects.
 
 ## Highlights
 
-- Added `AGENT_MEM_CONTEXT_DIRS` to `configs/uv-mcp.json`.
-- Updated the `uv run --directory` README example to include optional context directories.
-- Clarified that agents can browse those context directories through `memory_context_dirs` and `memory_context_read`.
+- Added a local linked-project registry at `.onboard/linked-projects.json`.
+- Added `setup-project.sh --list-linked` and `setup-project.sh --all-linked`.
+- Added `doctor.sh --list-linked` and `doctor.sh --all-linked`.
+- Added `update.sh --list-linked` and `update.sh --refresh-linked`.
+- Made `update.sh` safer: it skips unrelated folders, backs up overwritten files, and does not refresh project files unless explicitly requested.
+- Reworked setup around local `.venv/bin/python server.py` startup to avoid `uv run` startup timeouts when many MCP servers load together.
+- Replaced noisy end-turn hooks with lightweight startup mini-brief hooks.
+- Expanded agent roles and ticket controls for multi-agent workflows.
 
 ## Upgrade
 
 ```bash
 bash update.sh
-# Restart Claude Desktop / Cursor / Codex / Claude Code
+bash update.sh --refresh-linked
 ```
 
-## Notes
-
-No MCP behavior changed. This release only fixes the checkout-based `uv` template/docs so existing runtime support for context directories is visible.
+`--refresh-linked` preserves each project's registered hook mode. Restart your
+MCP clients after updating.

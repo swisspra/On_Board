@@ -14,7 +14,23 @@ Common fields:
 
 - `agent_name`: stable identity, such as `dev-main` or `tester-codex`
 - `agent_platform`: `claude-code`, `claude-desktop`, `cursor`, `codex`, `antigravity`, `windsurf`, or `other`
-- `agent_role`: `main`, `planner`, `tester`, `reviewer`, or `utility`
+- `agent_role`: `main`, `lead`, `planner`, `worker`, `tester`, `reviewer`, `reporter`, `subagent`, or `utility`
+
+Role guidance:
+
+- `main`: primary human-facing agent for the project/session
+- `lead`: orchestrates a track or group of agents
+- `planner`: breaks work into tickets/specs
+- `worker`: implements a ticket
+- `tester`: verifies behavior/evidence
+- `reviewer`: approves/rejects submitted work
+- `reporter`: writes reports/release notes
+- `subagent`: narrow helper spawned by another agent
+- `utility`: small cleanup/support task
+
+Ticket control uses roles. `main`, `lead`, and `reviewer` can cancel or
+terminate stuck tickets when the original creator is gone. Other roles can
+still cancel their own tickets, and a claimed agent can cancel its claimed work.
 - `task_focus`: short description of the current task
 - `mode`: `brief`, `normal`, `deep`, or `handoff-only`
 

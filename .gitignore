@@ -6,6 +6,7 @@ venv/
 
 # Agent shared memory (runtime data)
 .agent-mem/
+.onboard/
 
 # IDE and tool config (local only)
 .agent/
@@ -19,9 +20,12 @@ CLAUDE.md
 AGENTS.md
 
 # Development
+dist/
+.work/
 docs/*
 !docs/SETUP.md
 !docs/TOOLS.md
+!docs/A2A.md
 .cursorrules
 *.original.md
 *.original.*

@@ -6,10 +6,10 @@ PROJECT-LOCAL shared memory for multi-agent sequential workflows.
 Memory lives in .agent-mem/ inside the project directory — NOT global.
 
 Design principles:
-  - Agents run ONE AT A TIME (after previous agent KIA/done)
+  - Multiple agents can work at once; ticket claim/review state prevents collisions
   - Every entry is stamped with agent_name + agent_platform for traceability
   - Agents are FORCED to read memory on session start via hooks
-  - Agents are FORCED to checkpoint via hooks before session ends
+  - Agents write checkpoints/handoffs intentionally; hooks are only safety nets
   - If an agent dies (KIA), the next agent gets full context from .agent-mem/
 
 Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
@@ -64,7 +64,7 @@ BRIEFING_TYPE_CAP = {
 }
 
 # External info/reference folders — colon-separated paths
-# e.g. "/Users/swiss/docs/specs:/Users/swiss/shared/reference"
+# e.g. "/path/to/docs/specs:/path/to/shared/reference"
 CONTEXT_DIRS = [
     Path(p.strip()) for p in os.environ.get("AGENT_MEM_CONTEXT_DIRS", "").split(":")
     if p.strip()
@@ -113,6 +113,37 @@ class BriefingMode(str, Enum):
 
 class VectorBackend(str, Enum):
     NONE="none"; LOCAL="local"
+
+class AgentRole(str, Enum):
+    MAIN="main"
+    LEAD="lead"
+    PLANNER="planner"
+    WORKER="worker"
+    TESTER="tester"
+    REVIEWER="reviewer"
+    REPORTER="reporter"
+    SUBAGENT="subagent"
+    UTILITY="utility"
+
+COORDINATOR_ROLES = {AgentRole.MAIN.value, AgentRole.LEAD.value, AgentRole.REVIEWER.value}
+KNOWN_AGENT_ROLES = {role.value for role in AgentRole}
+AGENT_ROLE_ALIASES = {
+    "coder": AgentRole.WORKER.value,
+    "developer": AgentRole.WORKER.value,
+    "dev": AgentRole.WORKER.value,
+    "builder": AgentRole.WORKER.value,
+    "qa": AgentRole.TESTER.value,
+    "test": AgentRole.TESTER.value,
+    "review": AgentRole.REVIEWER.value,
+    "pm": AgentRole.LEAD.value,
+    "manager": AgentRole.LEAD.value,
+    "orchestrator": AgentRole.LEAD.value,
+    "coordinator": AgentRole.LEAD.value,
+    "sub-agent": AgentRole.SUBAGENT.value,
+    "sub_agent": AgentRole.SUBAGENT.value,
+    "helper": AgentRole.UTILITY.value,
+    "cleanup": AgentRole.UTILITY.value,
+}
 
 # ── Storage ─────────────────────────────────────────────
 class JsonMemoryStore:
@@ -186,22 +217,15 @@ def _load_prj(): return _load(_prj_p())
 def _save_prj(p): _save(_prj_p(), p)
 
 def _mark_prev_kia(exclude=None, platform=None, agent_name=None):
-    """Platform-scoped KIA: only kills agents on the SAME platform.
-    Agents from different platforms (claude, cursor, antigravity) coexist.
-    Same name + same platform → handled by update logic in memory_agent_join, not KIA'd here."""
-    agents = _load_agt(); changed = False
-    for aid, info in agents.items():
-        if aid == exclude or info.get("status") != AgentStatus.ACTIVE:
-            continue
-        # Same platform, different name → replaced (sequential per platform)
-        if platform and info.get("agent_platform") == platform and info.get("agent_name") != agent_name:
-            info["status"] = AgentStatus.KIA
-            info["kia_at"] = _now()
-            info["kia_reason"] = "replaced_same_platform"
-            changed = True
-        # Same name + same platform → skip (caller will update existing entry)
-        # Different platform → LEAVE ALONE (multi-agent concurrency)
-    if changed: _save_agt(agents)
+    """Legacy no-op.
+
+    Older On Board builds treated a new agent on the same platform as replacing
+    the previous one. That breaks parallel workers, especially when three Codex
+    or Cursor agents work different tickets at the same time. KIA is now idle
+    based, explicit, or data-health driven; joining never kills another active
+    agent.
+    """
+    return
 
 def _touch_heartbeat(agent_name: str):
     """Update last_activity for all active records of this agent."""
@@ -246,6 +270,26 @@ def _require_joined(agent_name: str) -> Optional[str]:
         f"2. Then call the write/ticket/checkpoint tool again.\n\n"
         f"Bootstrap-only tools like `memory_get_briefing(mode='brief')` and `memory_doctor()` remain safe before onboarding."
     )
+
+def _active_agent_info(agent_name: str) -> Optional[dict]:
+    for agent in _load_agt().values():
+        if agent.get("agent_name") == agent_name and agent.get("status") == AgentStatus.ACTIVE:
+            return agent
+    return None
+
+def _agent_role_value(agent: Optional[dict]) -> str:
+    if not agent:
+        return AgentRole.UTILITY.value
+    return _normalize_agent_role(agent.get("agent_role"))
+
+def _normalize_agent_role(role: object) -> str:
+    value = _enum_value(role)
+    normalized = str(value or AgentRole.UTILITY.value).strip().lower()
+    normalized = normalized.replace(" ", "-")
+    normalized = AGENT_ROLE_ALIASES.get(normalized, normalized)
+    if normalized in KNOWN_AGENT_ROLES:
+        return normalized
+    return AgentRole.UTILITY.value
 
 def _on_board_protocol_xml() -> str:
     return "\n".join([
@@ -684,7 +728,7 @@ class AgentJoinInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., description="Your stable identity — keep the SAME name across sessions. Example: 'claude-main', 'cursor-coder', 'codex-main'. Do NOT put dates or model names in here.", min_length=1, max_length=100)
     agent_platform: str = Field(default="unknown", description="Platform: claude, cursor, codex, claude-code, antigravity, windsurf, other", max_length=50)
-    agent_role: str = Field(default="main", description="Role: main (default), reviewer, utility, planner", max_length=30)
+    agent_role: str = Field(default=AgentRole.MAIN.value, description="Role: main, lead, planner, worker, tester, reviewer, reporter, subagent, utility. Common aliases like dev/coder/qa/orchestrator are accepted.", max_length=50)
     task_focus: Optional[str] = Field(default=None, description="What you'll work on this session", max_length=500)
 
 class MemoryWriteInput(BaseModel):
@@ -737,7 +781,7 @@ class OnboardInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., description="Your stable identity — keep the SAME name across sessions. Example: 'claude-main', 'cursor-coder', 'codex-main'.", min_length=1, max_length=100)
     agent_platform: str = Field(default="unknown", description="Platform: claude, cursor, codex, claude-code, antigravity, windsurf, other", max_length=50)
-    agent_role: str = Field(default="main", description="Role: main (default), reviewer, utility, planner", max_length=30)
+    agent_role: str = Field(default=AgentRole.MAIN.value, description="Role: main, lead, planner, worker, tester, reviewer, reporter, subagent, utility. Common aliases like dev/coder/qa/orchestrator are accepted.", max_length=50)
     task_focus: Optional[str] = Field(default=None, description="What you'll work on this session", max_length=500)
     mode: Optional[BriefingMode] = Field(default=BriefingMode.NORMAL, description="Briefing workflow mode")
     ticket_id: Optional[str] = Field(default=None, description="Optional ticket ID to focus the briefing")
@@ -810,12 +854,14 @@ async def memory_init(params: ProjectInitInput) -> str:
 
 @mcp.tool(name="memory_agent_join", annotations={"title":"Register as Active Agent","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
 async def memory_agent_join(params: AgentJoinInput) -> str:
-    """Register as the active agent. KIAs only agents on the SAME platform (multi-agent concurrency).
+    """Register as an active agent.
+
+    Multiple active agents may share a platform. Use ticket claims and roles to
+    prevent work collisions.
     Your agent_name is stamped on EVERY write for traceability."""
     prj = _load_prj()
     if not prj: return "Error: Not initialized. Call `memory_init` first."
     _lazy_kia_sweep()  # clean up idle agents before joining
-    _mark_prev_kia(platform=params.agent_platform, agent_name=params.agent_name)
     agents = _load_agt()
     # Update existing active entry if same name+platform, otherwise create new
     existing_aid = next(
@@ -828,13 +874,13 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
     rejoined = existing_aid is not None
     if rejoined:
         aid = existing_aid
-        agents[aid]["agent_role"] = params.agent_role
+        agents[aid]["agent_role"] = _normalize_agent_role(params.agent_role)
         agents[aid]["task_focus"] = params.task_focus
         agents[aid]["last_activity"] = time.time()
     else:
         aid = f"{params.agent_platform}-{_id()}"
         agents[aid] = {"agent_name": params.agent_name, "agent_platform": params.agent_platform,
-                       "agent_role": params.agent_role, "task_focus": params.task_focus, "status": AgentStatus.ACTIVE,
+                       "agent_role": _normalize_agent_role(params.agent_role), "task_focus": params.task_focus, "status": AgentStatus.ACTIVE,
                        "joined_at": _now(), "last_activity": time.time(), "memories_written": 0}
     _save_agt(agents)
     status_line = "🔄 **Rejoined**" if rejoined else "🟢 **On Board**"
@@ -842,12 +888,13 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
     # Naming warning
     if params.agent_name == params.agent_platform or len(params.agent_name) < 5 or params.agent_name[0].isupper():
         lines.append("⚠️ **Naming tip**: Use a stable lowercase role name like `claude-main`, `cursor-coder`, or `codex-reviewer`. Do not include dates, model names, or session IDs.\n")
-    # Show currently active agents on OTHER platforms
+    # Show currently active agents
     active_others = {k:v for k,v in agents.items() if k != aid and v.get("status") == AgentStatus.ACTIVE}
     if active_others:
-        lines.append("🌐 **Co-active agents** (other platforms):")
+        lines.append("🌐 **Co-active agents**:")
         for k,v in active_others.items():
-            lines.append(f"  🟢 `{v['agent_name']}` ({v['agent_platform']})")
+            role = v.get("agent_role", "main")
+            lines.append(f"  🟢 `{v['agent_name']}` ({v['agent_platform']}, {role})")
         lines.append("")
     # Show recent agents (bounded for context)
     prev = sorted(
@@ -906,7 +953,7 @@ async def memory_onboard(params: OnboardInput) -> str:
         _on_board_protocol_xml(),
         "",
         f"# 🚢 On Board Session: `{params.agent_name}`",
-        f"*Platform: `{params.agent_platform}` | Role: `{params.agent_role}`*",
+        f"*Platform: `{params.agent_platform}` | Role: `{_normalize_agent_role(params.agent_role)}`*",
     ]
     if params.task_focus:
         lines.append(f"*Focus: {params.task_focus}*")
@@ -2244,6 +2291,35 @@ class ListTicketsInput(BaseModel):
     include_closed: Optional[bool] = Field(default=False, description="Include closed/rejected tickets")
 
 
+def _ticket_creator_is_active(ticket: dict) -> bool:
+    creator = ticket.get("created_by")
+    if not creator:
+        return False
+    return any(
+        agent.get("agent_name") == creator and agent.get("status") == AgentStatus.ACTIVE
+        for agent in _load_agt().values()
+    )
+
+def _ticket_control_permission(agent_name: str, ticket: dict, action: str) -> tuple[bool, str]:
+    """Return whether an onboarded agent can cancel/terminate a ticket and why."""
+    actor = _active_agent_info(agent_name)
+    role = _agent_role_value(actor)
+    creator = ticket.get("created_by")
+    claimed_by = ticket.get("claimed_by")
+    creator_active = _ticket_creator_is_active(ticket)
+
+    if agent_name == creator:
+        return True, "creator"
+    if role in COORDINATOR_ROLES:
+        return True, f"{role} role"
+    if action == "cancel" and claimed_by == agent_name:
+        return True, "claimed agent"
+    allowed = "creator, active main/lead/reviewer"
+    if action == "cancel":
+        allowed += ", or claimed agent"
+    return False, allowed
+
+
 @mcp.tool(name="memory_create_ticket", annotations={"title":"Create Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
 async def memory_create_ticket(params: CreateTicketInput) -> str:
     """Create a ticket requesting help from another agent.
@@ -2567,47 +2643,53 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
 
 @mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
-    """Cancel a ticket. Only the original creator can cancel."""
+    """Cancel a ticket. Creator, claimed agent, active main/reviewer, or any onboarded agent when creator is unavailable."""
     err = _require_joined(agent_name)
     if err: return err
     _touch_heartbeat(agent_name)
     idx = _load_ticket_index()
     for t in idx:
         if t["id"] == ticket_id:
-            if t["created_by"] != agent_name:
-                return f"❌ Only the creator (`{t['created_by']}`) can cancel ticket `{ticket_id}`."
+            allowed, basis = _ticket_control_permission(agent_name, t, "cancel")
+            if not allowed:
+                return f"❌ `{agent_name}` cannot cancel `{ticket_id}`. Allowed: {basis}."
             if t["status"] in (TicketStatus.CLOSED, TicketStatus.CANCELED, TicketStatus.TERMINATED):
                 return f"Ticket `{ticket_id}` is already {t['status']}."
             t["status"] = TicketStatus.CANCELED
             t["updated_at"] = _now()
+            t["canceled_by"] = agent_name
+            t["cancel_permission"] = basis
             if reason:
                 t["cancel_reason"] = reason
             _save_ticket_index(idx)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
-            return f"🚫 Ticket `{ticket_id}` canceled by creator `{agent_name}`." + (f"\nReason: {reason}" if reason else "")
+            return f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."
 
 
 @mcp.tool(name="memory_terminate_ticket", annotations={"title":"Terminate Ticket","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":False})
 async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
-    """Forcefully terminate a ticket at any stage. Only the original creator can terminate."""
+    """Forcefully terminate a ticket at any stage. Creator or active main/reviewer only."""
     err = _require_joined(agent_name)
     if err: return err
     _touch_heartbeat(agent_name)
     idx = _load_ticket_index()
     for t in idx:
         if t["id"] == ticket_id:
-            if t["created_by"] != agent_name:
-                return f"❌ Only the creator (`{t['created_by']}`) can terminate ticket `{ticket_id}`."
+            allowed, basis = _ticket_control_permission(agent_name, t, "terminate")
+            if not allowed:
+                return f"❌ `{agent_name}` cannot terminate `{ticket_id}`. Allowed: {basis}."
             if t["status"] in (TicketStatus.CLOSED, TicketStatus.CANCELED, TicketStatus.TERMINATED):
                 return f"Ticket `{ticket_id}` is already {t['status']}."
             t["status"] = TicketStatus.TERMINATED
             t["updated_at"] = _now()
+            t["terminated_by"] = agent_name
+            t["terminate_permission"] = basis
             if reason:
                 t["terminate_reason"] = reason
             _save_ticket_index(idx)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
-            return f"⛔ Ticket `{ticket_id}` terminated by creator `{agent_name}`." + (f"\nReason: {reason}" if reason else "")
+            return f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."
 
 
@@ -2669,5 +2751,9 @@ def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-de
     )
 
 
-if __name__ == "__main__":
+def main() -> None:
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

@@ -21,6 +21,18 @@ Get On Board before any work.
 
 Fallback: `memory_agent_join` for join-only. If `memory_onboard` unavailable → `memory_get_briefing` first, then `memory_agent_join`.
 
+## Setup Control
+
+On Board setup is managed by generated project files, not by hand-editing hook
+configs. If the user asks to inspect or change On Board setup, read:
+
+```text
+.onboard/AGENT_CONTROL.md
+```
+
+Use the commands in that file for `doctor.sh`, MCP config, dashboard, and hook
+mode changes.
+
 ## Ticket Flow
 
 Tickets move work between agents:
@@ -37,7 +49,16 @@ Tickets move work between agents:
 
 - `agent_platform` = runner only. Values: `claude-code`, `claude-desktop`, `cursor`, `codex`, `antigravity`, `windsurf`, `other`. Never bare `claude`.
 - `agent_name` = stable, readable. Keep role stable across sessions. No dates / session IDs.
-- `agent_role` = function: `main`, `planner`, `tester`, `reviewer`, `utility`.
+- `agent_role` = function. Use one of:
+  - `main`: primary human-facing agent for the project/session
+  - `lead`: orchestrates a track or group of agents
+  - `planner`: breaks work into tickets/specs
+  - `worker`: implements a ticket
+  - `tester`: verifies behavior/evidence
+  - `reviewer`: approves/rejects submitted work
+  - `reporter`: writes reports/release notes
+  - `subagent`: narrow helper spawned by another agent
+  - `utility`: small cleanup/support task
 - `task_focus` = one sentence on current work. Shows in agent registry for coordination.
 
 ## Operating Rules

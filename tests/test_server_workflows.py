@@ -181,6 +181,57 @@ def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     assert any(a["agent_name"] == "codex-main" and a["status"] == "active" for a in agents.values())
 
 
+def test_same_platform_workers_can_stay_active_together(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "parallel project", "tech_stack": "python"})
+    server._save_mem([])
+
+    for name in ("codex-worker-a", "codex-worker-b", "codex-worker-c"):
+        asyncio.run(server.memory_onboard(server.OnboardInput(
+            agent_name=name,
+            agent_platform="codex",
+            agent_role="worker",
+            mode="brief",
+            include_tickets=False,
+            include_health=False,
+        )))
+
+    agents = server._load_agt()
+    active = [a for a in agents.values() if a.get("status") == "active"]
+
+    assert len(active) == 3
+    assert {a["agent_name"] for a in active} == {"codex-worker-a", "codex-worker-b", "codex-worker-c"}
+    assert all(a["agent_platform"] == "codex" for a in active)
+    assert all(a["agent_role"] == "worker" for a in active)
+
+
+def test_onboard_accepts_legacy_role_aliases(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "legacy role project", "tech_stack": "python"})
+    server._save_mem([])
+
+    asyncio.run(server.memory_onboard(server.OnboardInput(
+        agent_name="cursor-dev",
+        agent_platform="cursor",
+        agent_role="dev",
+        mode="brief",
+        include_tickets=False,
+        include_health=False,
+    )))
+    asyncio.run(server.memory_onboard(server.OnboardInput(
+        agent_name="weird-agent",
+        agent_platform="other",
+        agent_role="custom-old-role",
+        mode="brief",
+        include_tickets=False,
+        include_health=False,
+    )))
+    agents = {a["agent_name"]: a for a in server._load_agt().values()}
+
+    assert agents["cursor-dev"]["agent_role"] == "worker"
+    assert agents["weird-agent"]["agent_role"] == "utility"
+
+
 def test_ticket_mutations_require_onboarded_agent(tmp_path):
     server = load_server(tmp_path)
     server._save_prj({"description": "test project", "tech_stack": "python"})
@@ -255,6 +306,102 @@ def test_ticket_mutations_require_onboarded_agent(tmp_path):
 
     for output in (claim, submit, review, cancel, terminate):
         assert "NOT ON BOARD" in output
+
+
+def test_ticket_control_uses_agent_roles_for_stuck_work(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_mem([])
+    server._tickets_dir()
+    now = time.time()
+    server._save_agt({
+        "creator": {
+            "agent_name": "old-planner",
+            "agent_platform": "claude-code",
+            "agent_role": "planner",
+            "status": "kia",
+            "last_activity": now - 9999,
+        },
+        "lead": {
+            "agent_name": "codex-lead",
+            "agent_platform": "codex",
+            "agent_role": "lead",
+            "status": "active",
+            "last_activity": now,
+        },
+        "utility": {
+            "agent_name": "codex-helper",
+            "agent_platform": "codex",
+            "agent_role": "utility",
+            "status": "active",
+            "last_activity": now,
+        },
+    })
+    server._save_ticket_index([
+        {
+            "id": "TK-stuck",
+            "title": "Stuck ticket",
+            "description": "Creator is gone.",
+            "target_url": "local",
+            "scope": "READ-ONLY",
+            "required_fields": ["result"],
+            "priority": "medium",
+            "status": "open",
+            "created_by": "old-planner",
+            "assigned_to": None,
+            "claimed_by": None,
+            "created_at": "2026-05-08T12:01:00",
+            "updated_at": "2026-05-08T12:01:00",
+            "timestamp": now,
+        },
+        {
+            "id": "TK-danger",
+            "title": "Danger ticket",
+            "description": "Only coordinator should terminate.",
+            "target_url": "local",
+            "scope": "READ-ONLY",
+            "required_fields": ["result"],
+            "priority": "medium",
+            "status": "open",
+            "created_by": "old-planner",
+            "assigned_to": None,
+            "claimed_by": None,
+            "created_at": "2026-05-08T12:01:00",
+            "updated_at": "2026-05-08T12:01:00",
+            "timestamp": now,
+        },
+    ])
+
+    denied = asyncio.run(server.memory_terminate_ticket(
+        agent_name="codex-helper",
+        ticket_id="TK-danger",
+        reason="not needed",
+    ))
+    cancel_denied = asyncio.run(server.memory_cancel_ticket(
+        agent_name="codex-helper",
+        ticket_id="TK-stuck",
+        reason="not mine",
+    ))
+    canceled = asyncio.run(server.memory_cancel_ticket(
+        agent_name="codex-lead",
+        ticket_id="TK-stuck",
+        reason="creator KIA and scope obsolete",
+    ))
+    terminated = asyncio.run(server.memory_terminate_ticket(
+        agent_name="codex-lead",
+        ticket_id="TK-danger",
+        reason="unsafe duplicate",
+    ))
+    tickets = {ticket["id"]: ticket for ticket in server._load_ticket_index()}
+
+    assert "cannot terminate" in denied
+    assert "cannot cancel" in cancel_denied
+    assert "lead role" in canceled
+    assert tickets["TK-stuck"]["status"] == "canceled"
+    assert tickets["TK-stuck"]["canceled_by"] == "codex-lead"
+    assert "lead role" in terminated
+    assert tickets["TK-danger"]["status"] == "terminated"
+    assert tickets["TK-danger"]["terminated_by"] == "codex-lead"
 
 
 def test_memory_doctor_reports_duplicate_agents_and_orphaned_tickets(tmp_path):

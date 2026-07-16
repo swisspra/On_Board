@@ -1,5 +1,35 @@
 # Changelog
 
+## v3.6.0 — Safer Setup And Updates (2026-07-16)
+
+**One central On Board checkout can now safely serve and refresh multiple linked projects.**
+
+### Added
+- Local linked-project registry at `.onboard/linked-projects.json`
+- `setup-project.sh --list-linked` and `setup-project.sh --all-linked`
+- `doctor.sh --list-linked` and `doctor.sh --all-linked`
+- `update.sh --list-linked` and `update.sh --refresh-linked`
+- `AGENT_SETUP.md` as an agent-facing setup guide
+- `doctor.sh` as a read-only setup checker
+
+### Changed
+- `setup-project.sh` now generates `.onboard/` project config, `AGENT_CONTROL.md`, and a project dashboard launcher
+- `update.sh` now skips unrelated folders, backs up overwritten files, and requires an explicit refresh for linked projects
+- Linked project refresh preserves each project's registered hook mode
+- Default MCP runtime now uses `.venv/bin/python server.py` instead of `uv run`
+- Startup hooks now return a small read-only briefing; legacy stop/end-turn hooks no longer write memory
+- Agent roles and ticket controls were expanded for parallel worker/tester/reviewer flows
+
+### Upgrade
+```bash
+bash update.sh
+bash update.sh --refresh-linked
+```
+
+Restart your MCP clients after updating.
+
+---
+
 ## v3.5.2 — Context Dir Template (2026-05-09)
 
 **Small template fix for projects that use external reference directories.**

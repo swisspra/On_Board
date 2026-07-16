@@ -5,11 +5,6 @@
       {
         "command": "./.agent-mem-hooks/cursor-session-start.sh"
       }
-    ],
-    "stop": [
-      {
-        "command": "./.agent-mem-hooks/cursor-session-end.sh"
-      }
     ]
   }
 }

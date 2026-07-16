@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/full/path/to/On_Board",
+        "python",
+        "server.py"
+      ],
+      "env": {
+        "AGENT_PROJECT_DIR": "/full/path/to/your/project",
+        "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
+      }
+    }
+  }
+}
