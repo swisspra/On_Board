@@ -133,6 +133,21 @@ def test_briefing_and_status_limit_agent_history_to_latest_ten(tmp_path):
     assert "agent-00" not in status
 
 
+def test_briefing_hides_type_header_when_all_entries_are_pinned(tmp_path):
+    server = load_server(tmp_path)
+    seed_project(server)
+    mem = server._load_mem()
+    for m in mem:
+        if m["memory_type"] == "decision":
+            m["pinned"] = True
+    server._save_mem(mem)
+
+    briefing = asyncio.run(server.memory_get_briefing(server.BriefingInput(mode="brief", token_budget=8000)))
+
+    assert "## 📌 Pinned" in briefing
+    assert "## 🏛️ Decision" not in briefing
+
+
 def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     server = load_server(tmp_path)
     seed_project(server)
@@ -179,6 +194,46 @@ def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     assert "<ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>" in output
     assert "preferred one-call session entrypoint" not in output
     assert any(a["agent_name"] == "codex-main" and a["status"] == "active" for a in agents.values())
+
+
+def test_update_state_defaults_to_single_active_agent(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "state project", "tech_stack": "python"})
+    server._save_mem([])
+
+    asyncio.run(server.memory_onboard(server.OnboardInput(
+        agent_name="claude-opus-main",
+        agent_platform="claude",
+        mode="brief",
+        include_tickets=False,
+        include_health=False,
+    )))
+
+    output = asyncio.run(server.memory_update_state(server.UpdateStateInput(
+        key="mcp_tool_test",
+        value="ok",
+    )))
+    state = server._load_sta()
+
+    assert "(by `claude-opus-main`)" in output
+    assert state["mcp_tool_test"]["updated_by"] == "claude-opus-main"
+
+
+def test_update_state_requires_agent_name_when_multiple_agents_are_active(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "state project", "tech_stack": "python"})
+    server._save_agt({
+        "a1": {"agent_name": "codex-worker-a", "agent_platform": "codex", "status": "active", "last_activity": time.time()},
+        "a2": {"agent_name": "codex-worker-b", "agent_platform": "codex", "status": "active", "last_activity": time.time()},
+    })
+
+    output = asyncio.run(server.memory_update_state(server.UpdateStateInput(
+        key="mcp_tool_test",
+        value="ok",
+    )))
+
+    assert "agent_name is required because multiple active agents are on board" in output
+    assert "mcp_tool_test" not in server._load_sta()
 
 
 def test_same_platform_workers_can_stay_active_together(tmp_path):

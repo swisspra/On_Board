@@ -38,8 +38,6 @@ MEMORY_DIR = PROJECT_ROOT / ".agent-mem"
 # COLD: raw archive on disk, never loaded unless searched
 HOT_WINDOW_HOURS = int(os.environ.get("AGENT_MEM_HOT_HOURS", "24"))
 MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-COMPACT_MODEL = os.environ.get("AGENT_MEM_MODEL", "claude-sonnet-4-20250514")
 VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()
 
 # ── Multi-Agent Concurrency Config ──────────────────────
@@ -276,6 +274,28 @@ def _active_agent_info(agent_name: str) -> Optional[dict]:
         if agent.get("agent_name") == agent_name and agent.get("status") == AgentStatus.ACTIVE:
             return agent
     return None
+
+def _resolve_active_actor(agent_name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a mutating tool actor without guessing in multi-agent sessions."""
+    if agent_name:
+        joined_error = _require_joined(agent_name)
+        if joined_error:
+            return None, joined_error
+        return agent_name, None
+
+    active_agents = [
+        a for a in _load_agt().values()
+        if a.get("status") == AgentStatus.ACTIVE and a.get("agent_name")
+    ]
+    active_names = sorted({a["agent_name"] for a in active_agents})
+    if len(active_names) == 1:
+        return active_names[0], None
+    if len(active_names) > 1:
+        return None, (
+            "⛔ agent_name is required because multiple active agents are on board: "
+            + ", ".join(f"`{name}`" for name in active_names)
+        )
+    return None, "⛔ agent_name is required. Call `memory_onboard` first, then retry."
 
 def _agent_role_value(agent: Optional[dict]) -> str:
     if not agent:
@@ -575,72 +595,11 @@ def _doctor_gitignore() -> tuple:
         return "warn", f"- ⚠️ .gitignore: runtime memory ignored; local helper ignores missing: {', '.join(missing_local)}"
     return "ok", "- ✅ .gitignore: runtime/local paths ignored"
 
-async def _llm_summarize(entries: list, context: str = "") -> str:
-    """Call Claude API to compress a batch of memories into a digest.
-    Falls back to rule-based compression if no API key."""
-    if not ANTHROPIC_API_KEY:
-        return _rule_based_compress(entries)
-
-    entries_text = ""
-    for e in entries:
-        entries_text += f"[{e['memory_type'].upper()}] {e['title']} (by {e['agent_name']})\n{e['content']}\n---\n"
-
-    prompt = f"""Compress these agent memory entries into a concise digest.
-Keep: all decisions, warnings, file changes, and blockers (with who made them).
-Summarize: progress entries into one paragraph.
-Drop: redundant checkpoints (keep only the last state).
-Always preserve agent_name attribution.
-
-{f"Project context: {context}" if context else ""}
-
-ENTRIES:
-{entries_text}
-
-Write a structured digest in this format:
-## Decisions
-- [decision] by [agent_name]
-
-## Progress summary
-[1-2 paragraphs]
-
-## Warnings & blockers
-- [item] by [agent_name]
-
-## Files changed
-- [file] — [what changed] by [agent_name]
-
-## Key discoveries
-- [item] by [agent_name]
-
-Keep it under 500 words. Every fact must have agent_name attribution."""
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": ANTHROPIC_API_KEY,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": COMPACT_MODEL,
-                    "max_tokens": 1000,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["content"][0]["text"]
-    except Exception as ex:
-        # Fallback to rule-based if API fails
-        return _rule_based_compress(entries, error=str(ex))
-
 def _rule_based_compress(entries: list, error: str = "") -> str:
-    """Compress without LLM — extract key facts, drop verbose content."""
+    """Compress locally by extracting key facts and dropping verbose content."""
     lines = []
     if error:
-        lines.append(f"*[Compressed without LLM: {error[:80]}]*\n")
+        lines.append(f"*[Local compaction note: {error[:80]}]*\n")
 
     by_type = {}
     for e in entries:
@@ -823,7 +782,6 @@ class CompactInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: Optional[str] = Field(default=None, description="Who is running the compaction", max_length=100)
     force: Optional[bool] = Field(default=False, description="Force compaction even if under threshold")
-    use_llm: Optional[bool] = Field(default=False, description="Use external LLM API for summaries. Default False — rule-based is fine for most cases. You (the calling agent) can summarize better yourself.")
 
 class BootstrapInput(BaseModel):
     """Bootstrap memory for an existing project by scanning the codebase."""
@@ -1380,6 +1338,8 @@ async def memory_get_briefing(params: BriefingInput) -> str:
             break
         entries = by_type.get(mtype, [])
         if not entries: continue
+        entries = [m for m in entries if not m.get("pinned")]
+        if not entries: continue
         cap = type_caps.get(mtype, 5)
         # Sort newest first, take top N
         entries_sorted = sorted(entries, key=lambda m: m.get("timestamp",0), reverse=True)
@@ -1393,8 +1353,6 @@ async def memory_get_briefing(params: BriefingInput) -> str:
         _add(header)
 
         for m in capped:
-            # Skip pinned entries (already shown in pinned section)
-            if m.get("pinned"): continue
             c = m["content"][:120] + ("..." if len(m["content"]) > 120 else "")
             if not _add(f"- **{m['title']}** (`{m['agent_name']}`): {c}"): break
         _add("")
@@ -1579,12 +1537,14 @@ async def memory_pin(params: PinInput) -> str:
 @mcp.tool(name="memory_update_state", annotations={"title":"Update State","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_update_state(params: UpdateStateInput) -> str:
     """Update shared key-value state. Stamped with agent_name."""
-    if params.agent_name:
-        _touch_heartbeat(params.agent_name)
+    actor, error = _resolve_active_actor(params.agent_name)
+    if error:
+        return error
+    _touch_heartbeat(actor)
     s = _load_sta()
-    s[params.key] = {"value": params.value, "updated_at": _now(), "updated_by": params.agent_name or "unknown"}
+    s[params.key] = {"value": params.value, "updated_at": _now(), "updated_by": actor}
     _save_sta(s)
-    return f"🔧 `{params.key}` = `{params.value[:100]}` (by `{params.agent_name or '?'}`)"
+    return f"🔧 `{params.key}` = `{params.value[:100]}` (by `{actor}`)"
 
 # ── Token-Saving Tools ──────────────────────────────────
 
@@ -1595,7 +1555,7 @@ async def memory_compact(params: CompactInput) -> str:
     How it works:
     1. Splits memories into HOT (recent/pinned) and COLD (old)
     2. Groups cold entries by agent session
-    3. Compresses each group into a digest (LLM or rule-based)
+    3. Compresses each group into a local digest
     4. Archives raw cold entries to archive.json
     5. Keeps only hot entries in memories.json + adds digest references
 
@@ -1604,7 +1564,6 @@ async def memory_compact(params: CompactInput) -> str:
     Config via env vars:
     - AGENT_MEM_HOT_HOURS: hours to keep full detail (default: 24)
     - AGENT_MEM_MAX_HOT: max hot entries (default: 50)
-    - ANTHROPIC_API_KEY: for LLM-powered summaries
     """
     mem = _load_mem()
     if not mem:
@@ -1633,16 +1592,11 @@ async def memory_compact(params: CompactInput) -> str:
     _save_archive(archive)
 
     # Create digests
-    prj = _load_prj()
-    context = prj.get("description", "") if prj else ""
     digests = _load_digests()
     new_digest_titles = []
 
     for agent_name, entries in by_agent.items():
-        if params.use_llm and ANTHROPIC_API_KEY:
-            summary = await _llm_summarize(entries, context)
-        else:
-            summary = _rule_based_compress(entries)
+        summary = _rule_based_compress(entries)
 
         ts_range = ""
         timestamps = [e.get("created_at", "") for e in entries]
@@ -1658,7 +1612,7 @@ async def memory_compact(params: CompactInput) -> str:
             "digest_tokens": _estimate_tokens(summary),
             "summary": summary,
             "compressed_at": _now(),
-            "method": "llm" if (params.use_llm and ANTHROPIC_API_KEY) else "rule-based",
+            "method": "local",
         }
         digests.append(digest)
         new_digest_titles.append(f"`{agent_name}` ({len(entries)} entries → ~{digest['digest_tokens']} tokens)")
@@ -1680,7 +1634,7 @@ async def memory_compact(params: CompactInput) -> str:
         f"**Saved**: ~{saved:,} tokens ({pct:.0f}% reduction)\n"
         f"**Archived**: {len(cold)} entries to archive.json\n\n"
         f"**New digests**:\n" + "\n".join(f"- {t}" for t in new_digest_titles) +
-        f"\n\nMethod: {'LLM (Claude)' if (params.use_llm and ANTHROPIC_API_KEY) else 'rule-based'}"
+        f"\n\nMethod: local compaction"
         f"\n\nNext: run `memory_get_briefing(mode='brief')` to verify the handoff still reads cleanly."
     )
 
@@ -1729,7 +1683,7 @@ async def memory_token_usage() -> str:
         potential_saving = int(cold_tokens * 0.7)  # ~70% savings typical
         lines.append(f"## Recommended Workflow")
         lines.append(f"1. Run `memory_prepare_compaction` to review {len(cold)} compactable entries.")
-        lines.append(f"2. If the preview looks right, run `memory_compact(use_llm=false)`.")
+        lines.append(f"2. If the preview looks right, run `memory_compact()`.")
         lines.append(f"3. Expected saving: ~{potential_saving:,} tokens.")
     elif cold_tokens > 2000:
         potential_saving = int(cold_tokens * 0.7)
@@ -1747,15 +1701,14 @@ async def memory_token_usage() -> str:
 async def memory_prepare_compaction() -> str:
     """Returns cold entries grouped by agent session — ready for YOU to summarize.
 
-    Instead of using an external LLM (which double-charges), YOU are already an LLM.
     Read the returned entries, write your own digest with memory_write(memory_type='context'),
-    then run memory_compact(use_llm=False) to archive the originals.
+    then run memory_compact() to archive the originals.
 
     Workflow:
     1. Call memory_prepare_compaction() → get grouped cold entries
-    2. Read and summarize them yourself (you're an LLM, this is what you do)
+    2. Read and summarize them yourself
     3. Call memory_write(memory_type='context', title='Digest: ...', content='your summary')
-    4. Call memory_compact(use_llm=False) → archives cold entries, keeps your digest
+    4. Call memory_compact() → archives cold entries, keeps your digest
 
     Returns:
         str: Cold entries grouped by agent, with token counts.
@@ -1798,7 +1751,7 @@ async def memory_prepare_compaction() -> str:
     lines.append("---")
     lines.append("## Recommended Workflow")
     lines.append("1. If the preview has important nuance, write a short digest with `memory_write(memory_type='context', title='Digest: ...', content='...')`.")
-    lines.append("2. Run `memory_compact(use_llm=false)` to archive the cold raw entries and keep hot memory lean.")
+    lines.append("2. Run `memory_compact()` to archive the cold raw entries and keep hot memory lean.")
     lines.append("3. Use `memory_search_archive(query='...')` later if you need the old raw details.")
 
     return "\n".join(lines)

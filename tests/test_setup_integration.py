@@ -183,13 +183,75 @@ def test_setup_project_migration_preserves_existing_memory(tmp_path):
         ]
     }), encoding="utf-8")
 
-    run(["bash", "setup-project.sh", str(project)], env=env)
+    setup = run(["bash", "setup-project.sh", str(project)], env=env)
     doctor = run(["bash", "doctor.sh", str(project)], env=env)
+    report = json.loads((project / ".onboard" / "migration-report.json").read_text(encoding="utf-8"))
+    onboard_readme = (project / ".onboard" / "README.md").read_text(encoding="utf-8")
 
     assert "old project" in (mem_dir / "project.json").read_text(encoding="utf-8")
     assert "Keep old memory" in (mem_dir / "memories.json").read_text(encoding="utf-8")
     assert "TK-old" in (tickets_dir / "_index.json").read_text(encoding="utf-8")
+    assert report["existing_memory_detected"] is True
+    assert report["core_unchanged"] is True
+    assert "Existing memory was detected and verified unchanged" in setup.stdout
+    assert "memory_onboard, then memory_doctor" in setup.stdout
+    assert "Call memory_bootstrap" not in setup.stdout
+    assert "Call memory_onboard for this project, then memory_doctor." in onboard_readme
+    assert "Call memory_bootstrap" not in onboard_readme
     assert "0 failed" in doctor.stdout
+
+
+def test_setup_project_existing_memory_in_whitelist_repo_stays_ignored(tmp_path):
+    project = tmp_path / "project"
+    mem_dir = project / ".agent-mem"
+    mem_dir.mkdir(parents=True)
+    (project / ".gitignore").write_text(
+        "\n".join([
+            "/*",
+            "!/.gitignore",
+            "!/README.md",
+            ".agent-mem/",
+            "",
+        ]),
+        encoding="utf-8",
+    )
+    (mem_dir / "project.json").write_text(json.dumps({"description": "existing"}), encoding="utf-8")
+    (mem_dir / "agents.json").write_text("{}", encoding="utf-8")
+    (mem_dir / "memories.json").write_text(json.dumps({"entries": []}), encoding="utf-8")
+    (mem_dir / "state.json").write_text("{}", encoding="utf-8")
+    env = os.environ.copy()
+    env["ONBOARD_REGISTRY_FILE"] = str(tmp_path / "linked-projects.json")
+
+    before = {
+        path.relative_to(mem_dir).as_posix(): path.read_bytes()
+        for path in mem_dir.rglob("*")
+        if path.is_file()
+    }
+    run(["bash", "setup-project.sh", str(project)], env=env)
+    doctor = run(["bash", "doctor.sh", str(project)], env=env)
+    after = {
+        path.relative_to(mem_dir).as_posix(): path.read_bytes()
+        for path in mem_dir.rglob("*")
+        if path.is_file()
+    }
+    gitignore = (project / ".gitignore").read_text(encoding="utf-8")
+
+    assert before == after
+    assert "0 failed" in doctor.stdout
+    for entry in [
+        ".agent-mem/",
+        ".onboard/",
+        ".agent-mem-hooks/",
+        ".codex/",
+        ".cursor/",
+        ".claude/",
+        ".agent/",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".cursorrules",
+    ]:
+        assert entry in gitignore
+    assert json.loads((project / ".onboard" / "migration-report.json").read_text(encoding="utf-8"))["core_unchanged"] is True
 
 
 def test_update_skips_unrelated_target_and_backs_up_onboard_files(tmp_path):

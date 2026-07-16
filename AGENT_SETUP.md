@@ -39,7 +39,10 @@ bash doctor.sh /path/to/project
 - Generates agent setup control at `<project>/.onboard/AGENT_CONTROL.md`
 - Generates a dashboard launcher at `<project>/.onboard/run-dashboard.sh`
 - Registers the project in `<On_Board>/.onboard/linked-projects.json`
+- If `<project>/.agent-mem/` already exists, verifies core memory files are
+  unchanged and writes `<project>/.onboard/migration-report.json`
 - Does not initialize memory content
+- Does not write, move, or delete `.agent-mem/`
 
 `doctor.sh`:
 
@@ -117,15 +120,25 @@ Then ask them to add this MCP server manually:
 ## First Agent Step
 
 After the MCP client restarts and On Board tools are visible, tell the agent to
-run:
+run one of these flows.
+
+Existing project with `.agent-mem/` already present:
+
+```text
+memory_onboard(...)
+memory_doctor()
+```
+
+New or empty project:
 
 ```text
 memory_bootstrap(...)
 memory_onboard(...)
 ```
 
-Use `memory_init(...)` instead of `memory_bootstrap(...)` only for a new or
-empty project.
+Use `memory_init(...)` instead of `memory_bootstrap(...)` only when the user
+wants a blank manual init. Do not bootstrap an existing-memory project just
+because setup was regenerated.
 
 Use a specific `agent_role` when onboarding:
 

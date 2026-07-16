@@ -123,6 +123,24 @@ On Board `Stop` / `stop` hook entries from the project hook config.
 
 Runtime memory stays in `.agent-mem/` and should remain gitignored.
 
+If the project already has `.agent-mem/`, `setup-project.sh` treats it as an
+existing-memory migration. It does not write, move, or delete memory files. It
+fingerprints core memory files before and after setup, then writes proof to:
+
+```text
+/full/path/to/your/project/.onboard/migration-report.json
+```
+
+If those core files change during setup, the script fails.
+
+For existing-memory projects, do not bootstrap again unless you intentionally
+want to re-seed project metadata. After setup, use:
+
+```text
+memory_onboard()
+memory_doctor()
+```
+
 If an agent needs to inspect or change On Board setup later, point it to:
 
 ```text

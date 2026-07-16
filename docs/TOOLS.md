@@ -248,7 +248,7 @@ Recommended flow:
 ```text
 memory_prepare_compaction()
 memory_write(memory_type="context", title="Digest: ...", content="...")
-memory_compact({"use_llm": false})
+memory_compact()
 ```
 
 ### `memory_search_archive`

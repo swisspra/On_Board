@@ -166,9 +166,9 @@ memory_prepare_compaction()
 Read output, write your summary, archive:
 ```
 memory_write(memory_type="context", title="Digest: ...", content="your summary")
-memory_compact(use_llm=False)
+memory_compact()
 ```
-You ARE an LLM — summarize yourself, no extra API call.
+Summarize the preview yourself before archiving old raw entries.
 
 ---
 

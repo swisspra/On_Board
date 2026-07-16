@@ -180,6 +180,36 @@ else
 fi
 
 echo ""
+echo "Existing Memory Migration"
+if [ -d "$PROJECT_DIR/.agent-mem" ]; then
+    pass ".agent-mem exists"
+    if [ -f "$PROJECT_DIR/.onboard/migration-report.json" ]; then
+        if MIGRATION_CHECK=$(python3 - "$PROJECT_DIR/.onboard/migration-report.json" <<'PY' 2>&1
+import json
+import sys
+from pathlib import Path
+
+report = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if report.get("existing_memory_detected") and not report.get("core_unchanged"):
+    print("BAD: existing memory changed during setup")
+    raise SystemExit(1)
+print("OK")
+PY
+        ); then
+            pass ".onboard/migration-report.json memory unchanged"
+        else
+            fail ".onboard/migration-report.json reports unsafe migration: $MIGRATION_CHECK"
+        fi
+    elif [ ! -f "$PROJECT_DIR/.onboard/mcp.generated.json" ]; then
+        warn "Existing .agent-mem detected without new setup wrapper; run setup-project.sh to add local config without changing memory"
+    else
+        warn ".onboard/migration-report.json missing; rerun setup-project.sh to record migration proof"
+    fi
+else
+    warn ".agent-mem does not exist yet. Ask your agent to call memory_bootstrap or memory_init."
+fi
+
+echo ""
 echo "Generated MCP Config"
 MCP_JSON="$PROJECT_DIR/.onboard/mcp.json"
 GENERATED_MCP_JSON="$PROJECT_DIR/.onboard/mcp.generated.json"
@@ -188,6 +218,9 @@ HOOK_MODE="safe"
 check_file "$GENERATED_MCP_JSON" ".onboard/mcp.generated.json"
 check_file "$PROJECT_DIR/.onboard/AGENT_CONTROL.md" ".onboard/AGENT_CONTROL.md"
 check_executable "$PROJECT_DIR/.onboard/run-dashboard.sh" ".onboard/run-dashboard.sh"
+if [ -d "$PROJECT_DIR/.agent-mem" ]; then
+    check_file "$PROJECT_DIR/.onboard/migration-report.json" ".onboard/migration-report.json"
+fi
 if [ -f "$SETTINGS_JSON" ]; then
     HOOK_MODE="$(python3 - "$SETTINGS_JSON" <<'PY' 2>/dev/null || echo safe
 import json
@@ -308,20 +341,23 @@ echo "Git Ignore"
 GITIGNORE="$PROJECT_DIR/.gitignore"
 check_file "$GITIGNORE" ".gitignore"
 if [ -f "$GITIGNORE" ]; then
-    for entry in ".agent-mem/" ".onboard/"; do
+    for entry in \
+        ".agent-mem/" \
+        ".onboard/" \
+        ".agent-mem-hooks/" \
+        ".codex/" \
+        ".cursor/" \
+        ".claude/" \
+        ".agent/" \
+        "AGENTS.md" \
+        "CLAUDE.md" \
+        ".cursorrules"; do
         if grep -qF "$entry" "$GITIGNORE"; then
             pass ".gitignore contains $entry"
         else
             fail ".gitignore missing $entry"
         fi
     done
-fi
-
-echo ""
-if [ -d "$PROJECT_DIR/.agent-mem" ]; then
-    pass ".agent-mem exists"
-else
-    warn ".agent-mem does not exist yet. Ask your agent to call memory_bootstrap or memory_init."
 fi
 
 echo ""
