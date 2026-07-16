@@ -94,6 +94,40 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     assert str(project) in dashboard.read_text(encoding="utf-8")
 
 
+def test_doctor_does_not_loop_setup_for_manual_cleanup_failures(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    env = os.environ.copy()
+    env["ONBOARD_REGISTRY_FILE"] = str(tmp_path / "linked-projects.json")
+
+    run(["bash", "setup-project.sh", str(project)], env=env)
+
+    mcp_json = project / ".onboard" / "mcp.json"
+    config = json.loads(mcp_json.read_text(encoding="utf-8"))
+    config["mcpServers"]["agent-memory"]["env"]["AGENT_PROJECT_DIR"] = str(tmp_path / "old-project")
+    mcp_json.write_text(json.dumps(config), encoding="utf-8")
+
+    cursor_hooks = project / ".cursor" / "hooks.json"
+    cursor_hooks.write_text(json.dumps({"hooks": {"Stop": []}}), encoding="utf-8")
+
+    doctor = subprocess.run(
+        ["bash", "doctor.sh", str(project)],
+        cwd=REPO_ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert doctor.returncode == 1
+    assert "Manual cleanup is required for existing custom files" in doctor.stdout
+    assert "Agent-assisted fix:" in doctor.stdout
+    assert "fix only the listed On Board config/hook issues" in doctor.stdout
+    assert "do not change .agent-mem/" in doctor.stdout
+    assert "Do not rerun setup-project.sh for these failures" in doctor.stdout
+    assert f'bash "{REPO_ROOT / "setup-project.sh"}" "{project}"' not in doctor.stdout
+
+
 def test_setup_project_does_not_prune_existing_test_extras():
     setup = (REPO_ROOT / "setup-project.sh").read_text(encoding="utf-8")
     update = (REPO_ROOT / "update.sh").read_text(encoding="utf-8")

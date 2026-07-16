@@ -186,10 +186,13 @@ ticket tools.
 
 ## If Something Fails
 
-If `doctor.sh` fails, rerun:
+If `doctor.sh` fails, follow its `Next:` section. Do not blindly rerun setup:
+existing MCP configs and hook files may require manual cleanup because
+`setup-project.sh` intentionally does not overwrite custom files.
+
+After cleanup, verify again:
 
 ```bash
-bash /path/to/On_Board/setup-project.sh /path/to/project
 bash /path/to/On_Board/doctor.sh /path/to/project
 ```
 

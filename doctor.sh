@@ -41,6 +41,9 @@ done
 OK=0
 WARN=0
 FAIL=0
+MANUAL_FAIL=0
+SETUP_FAIL=0
+MANUAL_ACTIONS=()
 
 pass() {
     OK=$((OK + 1))
@@ -54,7 +57,18 @@ warn() {
 
 fail() {
     FAIL=$((FAIL + 1))
+    SETUP_FAIL=$((SETUP_FAIL + 1))
     echo "❌ $1"
+}
+
+fail_manual() {
+    FAIL=$((FAIL + 1))
+    MANUAL_FAIL=$((MANUAL_FAIL + 1))
+    echo "❌ $1"
+}
+
+add_manual_action() {
+    MANUAL_ACTIONS+=("$1")
 }
 
 check_file() {
@@ -269,7 +283,14 @@ PY
         while IFS= read -r line; do
             case "$line" in
                 *=OK) pass "MCP config $line" ;;
-                *=BAD:*) fail "MCP config $line" ;;
+                AGENT_PROJECT_DIR=BAD:*)
+                    fail_manual "MCP config $line"
+                    add_manual_action "Fix AGENT_PROJECT_DIR in $MCP_JSON, or replace it with $GENERATED_MCP_JSON if this project should use the generated config."
+                    ;;
+                *=BAD:*)
+                    fail_manual "MCP config $line"
+                    add_manual_action "Review $MCP_JSON against $GENERATED_MCP_JSON. setup-project.sh will not overwrite an existing primary MCP config."
+                    ;;
                 *) [ -n "$line" ] && warn "MCP config check: $line" ;;
             esac
         done <<< "$CONFIG_CHECK"
@@ -315,7 +336,8 @@ PY
         then
             :
         else
-            fail "Turn-scoped Stop hook is still configured: $hook_config"
+            fail_manual "Turn-scoped Stop hook is still configured: $hook_config"
+            add_manual_action "Remove the Stop/stop hook block from $hook_config, or merge the current template from $SCRIPT_DIR/configs/."
         fi
     fi
 done
@@ -366,7 +388,22 @@ echo "Summary: $OK passed, $WARN warnings, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
     echo ""
     echo "Next:"
-    echo "  bash \"$SCRIPT_DIR/setup-project.sh\" \"$PROJECT_DIR\""
+    if [ "$MANUAL_FAIL" -gt 0 ]; then
+        echo "  Manual cleanup is required for existing custom files. Do not rerun setup-project.sh for these failures; it will not overwrite them."
+        if [ "${#MANUAL_ACTIONS[@]}" -gt 0 ]; then
+            for action in "${MANUAL_ACTIONS[@]}"; do
+                echo "  - $action"
+            done
+        fi
+        echo ""
+        echo "  Agent-assisted fix:"
+        echo "  Ask your agent to review this doctor output, fix only the listed On Board config/hook issues,"
+        echo "  do not rerun setup-project.sh for these manual failures, do not change .agent-mem/, then rerun:"
+    fi
+    if [ "$SETUP_FAIL" -gt 0 ]; then
+        echo "  After manual cleanup, rerun setup if generated files are still missing:"
+        echo "  bash \"$SCRIPT_DIR/setup-project.sh\" \"$PROJECT_DIR\""
+    fi
     echo "  bash \"$SCRIPT_DIR/doctor.sh\" \"$PROJECT_DIR\""
     exit 1
 fi
