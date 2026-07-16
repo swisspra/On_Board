@@ -52,6 +52,16 @@ bash doctor.sh /path/to/project
 - Checks project rules and hooks
 - Reports the next step
 
+For the On Board source repo itself, use:
+
+```bash
+bash doctor.sh --self
+```
+
+This checks that public source contains only templates/source files, not
+project-generated runtime folders. Do not run `setup-project.sh` with the On
+Board checkout as the target project.
+
 Linked project helpers:
 
 ```bash

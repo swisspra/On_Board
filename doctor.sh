@@ -12,6 +12,7 @@ REGISTRY_FILE="${ONBOARD_REGISTRY_FILE:-$SCRIPT_DIR/.onboard/linked-projects.jso
 PROJECT_DIR="$(pwd)"
 LIST_LINKED=0
 ALL_LINKED=0
+SELF_CHECK=0
 
 if [ "${1:-}" != "" ] && [[ "${1:-}" != --* ]]; then
     PROJECT_DIR="$1"
@@ -28,11 +29,16 @@ while [ "$#" -gt 0 ]; do
             ALL_LINKED=1
             shift
             ;;
+        --self)
+            SELF_CHECK=1
+            shift
+            ;;
         *)
             echo "❌ Unknown option: $1"
             echo "Usage: bash doctor.sh /path/to/project"
             echo "       bash doctor.sh --list-linked"
             echo "       bash doctor.sh --all-linked"
+            echo "       bash doctor.sh --self"
             exit 1
             ;;
     esac
@@ -101,6 +107,30 @@ check_optional_file() {
     fi
 }
 
+self_check_path_absent() {
+    local path="$1"
+    local label="$2"
+    if [ -e "$path" ]; then
+        fail "$label should not exist in the public source repo: $path"
+    else
+        pass "$label absent"
+    fi
+}
+
+self_check_tracked_absent() {
+    local path="$1"
+    local label="$2"
+    if git -C "$SCRIPT_DIR" ls-files --deleted --error-unmatch "$path" >/dev/null 2>&1; then
+        pass "$label scheduled for removal"
+        return
+    fi
+    if git -C "$SCRIPT_DIR" ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+        fail "$label is still tracked: $path"
+    else
+        pass "$label not tracked"
+    fi
+}
+
 find_onboard_python() {
     if [ -x "$SCRIPT_DIR/.venv/bin/python" ]; then
         printf "%s\n" "$SCRIPT_DIR/.venv/bin/python"
@@ -141,6 +171,49 @@ if [ "$LIST_LINKED" -eq 1 ]; then
     else
         echo "  (none)"
     fi
+    exit 0
+fi
+
+if [ "$SELF_CHECK" -eq 1 ]; then
+    echo "🩺 On Board Source Doctor"
+    echo "On Board: $SCRIPT_DIR"
+    echo ""
+    echo "Public Source Hygiene"
+    for rel in \
+        ".agent-mem" \
+        ".agent-mem-hooks" \
+        ".codex" \
+        ".cursor" \
+        ".claude" \
+        ".agent" \
+        "AGENTS.md" \
+        "CLAUDE.md" \
+        ".cursorrules"; do
+        self_check_path_absent "$SCRIPT_DIR/$rel" "$rel"
+    done
+    for rel in \
+        "hooks/claude-code-stop.sh" \
+        "hooks/codex-stop.sh" \
+        "hooks/cursor-session-end.sh"; do
+        self_check_path_absent "$SCRIPT_DIR/$rel" "$rel"
+        self_check_tracked_absent "$rel" "$rel"
+    done
+    echo ""
+    echo "Local Runtime"
+    if [ -d "$SCRIPT_DIR/.onboard" ]; then
+        warn ".onboard exists; this is local linked-project registry data and must stay gitignored"
+    else
+        pass ".onboard absent"
+    fi
+    if [ -d "$SCRIPT_DIR/.venv" ]; then
+        pass ".venv exists"
+    else
+        warn ".venv missing; run uv sync --inexact before local MCP use"
+    fi
+
+    echo ""
+    echo "Summary: $OK passed, $WARN warnings, $FAIL failed"
+    [ "$FAIL" -eq 0 ] || exit 1
     exit 0
 fi
 

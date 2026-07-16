@@ -1,5 +1,6 @@
 from pathlib import Path
 import re
+import subprocess
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -85,21 +86,38 @@ def test_stop_hooks_are_not_installed_or_memory_writing_by_default():
             "configs/cursor-hooks.json",
         ]
     )
-    stop_scripts = "\n".join(
-        (REPO_ROOT / path).read_text(encoding="utf-8")
-        for path in [
-            "hooks/claude-code-stop.sh",
-            "hooks/codex-stop.sh",
-            "hooks/cursor-session-end.sh",
-        ]
-    )
-
     assert '"Stop"' not in configs
     assert '"stop"' not in configs
     assert "Turn-scoped Stop hook is still configured" in (REPO_ROOT / "doctor.sh").read_text(encoding="utf-8")
-    assert "status\"] = \"kia\"" not in stop_scripts
-    assert "memory_type" not in stop_scripts
-    assert "legacy no-op" in stop_scripts
+    assert not (REPO_ROOT / "hooks/claude-code-stop.sh").exists()
+    assert not (REPO_ROOT / "hooks/codex-stop.sh").exists()
+    assert not (REPO_ROOT / "hooks/cursor-session-end.sh").exists()
+
+
+def test_public_source_repo_has_no_generated_project_files():
+    generated_paths = [
+        ".agent-mem",
+        ".agent-mem-hooks",
+        ".codex",
+        ".cursor",
+        ".claude",
+        ".agent",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".cursorrules",
+    ]
+    for path in generated_paths:
+        assert not (REPO_ROOT / path).exists(), path
+
+    result = subprocess.run(
+        ["bash", "doctor.sh", "--self"],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+    assert "On Board Source Doctor" in result.stdout
+    assert "0 failed" in result.stdout
 
 
 def test_release_materials_match_current_version():

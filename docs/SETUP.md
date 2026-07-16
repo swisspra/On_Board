@@ -55,6 +55,15 @@ The linked-project registry is local machine state and is gitignored. It lets
 On Board remember which projects point at this central checkout without scanning
 your filesystem.
 
+Maintainers can check the public source checkout itself with:
+
+```bash
+bash doctor.sh --self
+```
+
+That command verifies source hygiene only. Do not target the On Board checkout
+with `setup-project.sh`; run setup against the project that should use On Board.
+
 ## Add the generated MCP config to your client
 
 Open:
