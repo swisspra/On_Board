@@ -126,10 +126,10 @@ def test_release_materials_match_current_version():
     first_header = next(line for line in changelog.splitlines() if line.startswith("## v"))
     release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
 
-    assert re.search(r'^version = "3\.7\.0"$', pyproject, re.MULTILINE)
-    assert first_header.startswith("## v3.7.0")
-    assert "Compact Onboarding" in first_header
-    for expected in ["compact current context", "pinned_summary", "memory_pin", "28 MCP tools"]:
+    assert re.search(r'^version = "3\.7\.1"$', pyproject, re.MULTILINE)
+    assert first_header.startswith("## v3.7.1")
+    assert "MCP SDK Security Update" in first_header
+    for expected in ["mcp", "1.28.1", "Dependabot", "No On Board behavior changes"]:
         assert expected in release_notes
 
 

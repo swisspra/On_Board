@@ -1,5 +1,23 @@
 # Changelog
 
+## v3.7.1 — MCP SDK Security Update (2026-07-21)
+
+**Security patch for the open Dependabot MCP Python SDK alerts.**
+
+### Changed
+- Updated locked `mcp` dependency from `1.27.1` to `1.28.1`.
+- No On Board behavior changes from v3.7.0.
+
+### Upgrade
+```bash
+bash update.sh
+bash update.sh --refresh-linked
+```
+
+Restart your MCP clients after updating.
+
+---
+
 ## v3.7.0 — Compact Onboarding (2026-07-21)
 
 **Agent startup is now shorter, with full context moved back to explicit tools.**
