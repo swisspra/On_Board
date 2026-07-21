@@ -22,15 +22,33 @@ GitHub Release, plus a security dependency update for the MCP Python SDK.
 ## Notes
 
 - This release is compatible with existing `.agent-mem` project memory.
-- Existing linked projects should use `bash update.sh --refresh-linked` after updating the central checkout.
+- Existing linked projects can use `bash update.sh --refresh-linked` to update the central checkout and refresh generated project files in one run.
 - Restart MCP clients after updating so they reload generated config and hooks.
 
 ## Upgrade
 
+Update this On Board checkout only:
+
 ```bash
 bash update.sh
-bash update.sh --refresh-linked
+bash doctor.sh --self
 ```
 
-`--refresh-linked` preserves each project's registered hook mode. Restart your
-MCP clients after updating.
+Update this checkout and refresh every registered linked project:
+
+```bash
+bash update.sh --refresh-linked
+bash doctor.sh --all-linked
+```
+
+`--refresh-linked` also performs the normal update first. It preserves each
+project's registered hook mode. Restart your MCP clients after updating.
+
+If you are upgrading from v3.5.2 or older, refresh project setup after the
+central update so generated `.onboard/` config, rules, hooks, and dashboard
+launchers are current:
+
+```bash
+bash setup-project.sh /path/to/your/project
+bash doctor.sh /path/to/your/project
+```

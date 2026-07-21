@@ -13,10 +13,26 @@
 - Removed the old root `index.html` GitHub Pages landing page.
 
 ### Upgrade
+Update this On Board checkout only:
+
 ```bash
 bash update.sh
-bash update.sh --refresh-linked
+bash doctor.sh --self
 ```
+
+Update this checkout and refresh every registered linked project:
+
+```bash
+bash update.sh --refresh-linked
+bash doctor.sh --all-linked
+```
+
+`--refresh-linked` also performs the normal update first and preserves each
+project's registered hook mode.
+
+If upgrading from v3.5.2 or older, rerun `setup-project.sh /path/to/your/project`
+and `doctor.sh /path/to/your/project` for projects that are not in the linked
+project registry.
 
 Restart your MCP clients after updating.
 
