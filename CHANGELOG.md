@@ -1,5 +1,30 @@
 # Changelog
 
+## v3.7.0 — Compact Onboarding (2026-07-21)
+
+**Agent startup is now shorter, with full context moved back to explicit tools.**
+
+### Changed
+- `memory_onboard` now returns compact current context instead of embedding full `memory_get_briefing` and full `memory_list_tickets` output.
+- Onboard output now points agents to the right detail tools: `memory_get_briefing`, `memory_list_tickets`, `memory_read`, `memory_search`, `memory_links`, `memory_doctor`, `memory_status`, and `memory_token_usage`.
+- `memory_write(priority=3)` now auto-pins critical memory and stores a compact `pinned_summary` while preserving raw `content`.
+- System-generated pinned entries, including handoffs, checkpoints, ticket submit handoffs, and rejection warnings, now get `pinned_summary`.
+- Startup hook and agent-rule wording now describe compact current context instead of full briefing.
+
+### Removed
+- Removed the rarely used `memory_pin` public tool. Use `memory_write(priority=3, pinned_summary=...)` for critical pinned memory.
+- Public tool count is now 28.
+
+### Upgrade
+```bash
+bash update.sh
+bash update.sh --refresh-linked
+```
+
+Restart your MCP clients after updating.
+
+---
+
 ## v3.6.0 — Safer Setup And Updates (2026-07-16)
 
 **One central On Board checkout can now safely serve and refresh multiple linked projects.**

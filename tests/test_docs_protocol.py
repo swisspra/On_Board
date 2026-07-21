@@ -44,7 +44,7 @@ def test_setup_uses_shared_agent_rules_template():
     assert "templates/agent-rules.md" in setup
     assert "RULES_NOTE=\"$(cat \"$RULES_TEMPLATE\")\"" in setup
     assert "Re-join after every off-board action" in template
-    assert "joins the session and returns the briefing in one call" in template
+    assert "joins the session and returns compact current context" in template
     assert "target_url" in template
     assert "required_fields" in template
     assert "description" in template
@@ -126,10 +126,10 @@ def test_release_materials_match_current_version():
     first_header = next(line for line in changelog.splitlines() if line.startswith("## v"))
     release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
 
-    assert re.search(r'^version = "3\.6\.0"$', pyproject, re.MULTILINE)
-    assert first_header.startswith("## v3.6.0")
-    assert "Safer Setup And Updates" in first_header
-    for expected in ["linked-projects.json", "--refresh-linked", "onboard_server.py", "startup mini-brief"]:
+    assert re.search(r'^version = "3\.7\.0"$', pyproject, re.MULTILINE)
+    assert first_header.startswith("## v3.7.0")
+    assert "Compact Onboarding" in first_header
+    for expected in ["compact current context", "pinned_summary", "memory_pin", "28 MCP tools"]:
         assert expected in release_notes
 
 

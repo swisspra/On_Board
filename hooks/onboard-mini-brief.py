@@ -122,7 +122,7 @@ def build_no_memory() -> str:
 def fit(text: str) -> str:
     if len(text) <= MAX_CHARS:
         return text
-    suffix = "\n...[startup hint truncated; call memory_onboard for full briefing]"
+    suffix = "\n...[startup hint truncated; call memory_onboard for compact current context]"
     if MAX_CHARS <= len(suffix):
         return suffix[:MAX_CHARS]
     return text[: max(0, MAX_CHARS - len(suffix))].rstrip() + suffix
@@ -186,7 +186,7 @@ def build_brief(mem_dir: Path) -> str:
         f"\nCounts: {len(memories)} memories, {len(agents)} agents, {len(open_tickets)} open tickets."
     )
     lines.extend(["", *protocol_lines()])
-    lines.append("Next: call `memory_onboard` for the full briefing.")
+    lines.append("Next: call `memory_onboard` for compact current context.")
 
     return fit("\n".join(lines))
 

@@ -1,12 +1,12 @@
 # On Board Tools
 
-On Board exposes 29 MCP tools. Most work starts with `memory_onboard`.
+On Board exposes 28 MCP tools. Most work starts with `memory_onboard`.
 
 ## Agent lifecycle
 
 ### `memory_onboard`
 
-Primary entry point for every agent session. Joins the project and returns the briefing in one call.
+Primary entry point for every agent session. Joins the project and returns compact current context: collision check, latest handoff summary, tickets, pinned critical memory, and next commands.
 
 Use when: starting work, returning after `/compact`, or recovering from `NOT ON BOARD`.
 
@@ -32,7 +32,7 @@ Ticket control uses roles. `main`, `lead`, and `reviewer` can cancel or
 terminate stuck tickets when the original creator is gone. Other roles can
 still cancel their own tickets, and a claimed agent can cancel its claimed work.
 - `task_focus`: short description of the current task
-- `mode`: `brief`, `normal`, `deep`, or `handoff-only`
+- `mode`: kept for compatibility; call `memory_get_briefing` directly when you need `brief`, `normal`, `deep`, or `handoff-only` context.
 
 ### `memory_agent_join`
 
@@ -82,6 +82,12 @@ Memory types:
 
 Use `related_files`, `related_tickets`, and `tags` when they help the next agent search.
 
+Critical memory:
+
+- Set `priority=3` for critical decisions, warnings, or blockers.
+- `priority=3` is auto-pinned and gets a compact `pinned_summary` for onboard/briefing views.
+- Raw `content` is still stored in full.
+
 ### `memory_read`
 
 Read recent memory. Supports filters by type, tag, agent, time window, and limit.
@@ -114,10 +120,6 @@ Useful filters:
 - `agent_name`
 - `file`
 - `include_archive`
-
-### `memory_pin`
-
-Pin or unpin an important memory so it stays visible in briefings.
 
 ## Ticket queue
 

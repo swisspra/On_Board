@@ -14,7 +14,7 @@ Get On Board before any work.
 
 ## Start Here
 
-1. `memory_onboard` w/ stable agent_name, agent_platform, agent_role, optional task_focus → joins the session and returns the briefing in one call.
+1. `memory_onboard` w/ stable agent_name, agent_platform, agent_role, optional task_focus → joins the session and returns compact current context.
 2. `memory_write` after significant code changes, decisions, discoveries, blockers, warnings.
 3. `memory_checkpoint` every 10-15 min during long work.
 4. `memory_handoff` before finishing.

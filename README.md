@@ -167,13 +167,13 @@ end, not in the middle.
 
 ---
 
-## Tools (29 MCP tools, 5 buckets)
+## Tools (28 MCP tools, 5 buckets)
 
 | Bucket | Tools |
 |---|---|
 | **Agent lifecycle** | `memory_onboard`, `memory_agent_join`, `memory_handoff`, `memory_checkpoint`, `memory_get_briefing` |
 | **Ticket queue** | `memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets` |
-| **Persistent memory** | `memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links`, `memory_pin` |
+| **Persistent memory** | `memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links` |
 | **Project context** | `memory_init`, `memory_bootstrap`, `memory_status`, `memory_doctor`, `memory_update_state`, `memory_context_dirs`, `memory_context_read` |
 | **Compaction** | `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive` |
 
@@ -221,12 +221,12 @@ files an audit can read.
 
 ---
 
-## Current status (v3.6.0, July 2026)
+## Current status (v3.7.0, July 2026)
 
 The current local setup is built around one central On Board checkout and one
 project-selected memory folder:
 
-- `memory_onboard` is the primary start call for agents.
+- `memory_onboard` is the primary start call for agents and returns compact current context.
 - `memory_doctor` checks setup and data integrity.
 - `setup-project.sh` generates project MCP config, rules, startup hooks, and a
   dashboard launcher.

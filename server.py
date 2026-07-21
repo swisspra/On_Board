@@ -45,6 +45,13 @@ VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()
 IDLE_KIA_MIN = int(os.environ.get("AGENT_MEM_IDLE_KIA_MIN", "30"))
 IDLE_WARN_MIN = IDLE_KIA_MIN // 2  # warn at half the KIA threshold
 AGENT_HISTORY_LIMIT = 10
+PINNED_SUMMARY_MAX_CHARS = 180
+ONBOARD_PROJECT_MAX_CHARS = 220
+ONBOARD_STATUS_MAX_CHARS = 150
+ONBOARD_PINNED_LIMIT = 5
+ONBOARD_KIA_LIMIT = 5
+ONBOARD_ASSIGNED_TICKET_LIMIT = 5
+ONBOARD_QUEUE_TICKET_LIMIT = 3
 
 # Briefing type caps — how many entries of each type to include in briefings.
 # High-signal types get unlimited. Spam-prone types get capped hard.
@@ -264,7 +271,7 @@ def _require_joined(agent_name: str) -> Optional[str]:
     return (
         f"⛔ NOT ON BOARD: Agent `{agent_name}` has not joined this project.\n\n"
         f"**Get On Board** — follow these steps IN ORDER:\n"
-        f"1. `memory_onboard(agent_name='{agent_name}', agent_platform='...')` — join and read context\n"
+        f"1. `memory_onboard(agent_name='{agent_name}', agent_platform='...')` — join and read compact current context\n"
         f"2. Then call the write/ticket/checkpoint tool again.\n\n"
         f"Bootstrap-only tools like `memory_get_briefing(mode='brief')` and `memory_doctor()` remain safe before onboarding."
     )
@@ -334,6 +341,30 @@ def _save_digests(d): _save(_digests_p(), {"digests": d})
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for English."""
     return len(text) // 4
+
+def _compact_line(text: str, max_chars: int) -> str:
+    """Single-line summary helper for compact briefing surfaces."""
+    line = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(line) <= max_chars:
+        return line
+    return line[: max_chars - 1].rstrip() + "…"
+
+def _pinned_summary(title: str, content: str, explicit: Optional[str] = None) -> str:
+    """Summary shown in compact/onboard surfaces; raw content remains canonical."""
+    source = explicit or content or title
+    return _compact_line(source, PINNED_SUMMARY_MAX_CHARS)
+
+def _finalize_memory_entry(entry: dict, pinned_summary: Optional[str] = None) -> dict:
+    """Normalize memory entry metadata before saving without mutating raw content."""
+    if entry.get("pinned") and not entry.get("pinned_summary"):
+        entry["pinned_summary"] = _pinned_summary(entry.get("title", ""), entry.get("content", ""), pinned_summary)
+    return entry
+
+def _minutes_ago(ts: object) -> str:
+    try:
+        return f"{max(0, int((time.time() - float(ts)) // 60))}m"
+    except (TypeError, ValueError):
+        return "?"
 
 def _count_mem_tokens(memories: list) -> int:
     """Estimate total tokens across all memory entries."""
@@ -700,6 +731,7 @@ class MemoryWriteInput(BaseModel):
     related_files: Optional[List[str]] = Field(default_factory=list)
     related_tickets: Optional[List[str]] = Field(default_factory=list)
     priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin)")
+    pinned_summary: Optional[str] = Field(default=None, description="One-line summary for priority=3 pinned memory; raw content is still stored in full", max_length=500)
 
 class MemoryReadInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -766,11 +798,6 @@ class MemoryLinksInput(BaseModel):
     include_archive: Optional[bool] = Field(default=False, description="Include archived memories in link analysis")
     limit: Optional[int] = Field(default=20, ge=1, le=100)
 
-class PinInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
-    memory_id: str = Field(..., min_length=1)
-    pinned: bool = True
-
 class UpdateStateInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     key: str = Field(..., min_length=1, max_length=100)
@@ -799,6 +826,232 @@ class BootstrapInput(BaseModel):
 
 # ── Tools ───────────────────────────────────────────────
 
+def _join_agent_session(agent_name: str, agent_platform: str, agent_role: str, task_focus: Optional[str]) -> tuple[str, bool, dict]:
+    """Register or refresh an active agent and return the updated registry."""
+    _lazy_kia_sweep()
+    agents = _load_agt()
+    existing_aid = next(
+        (k for k, v in agents.items()
+         if v.get("agent_name") == agent_name
+         and v.get("agent_platform") == agent_platform
+         and v.get("status") == AgentStatus.ACTIVE),
+        None
+    )
+    rejoined = existing_aid is not None
+    if rejoined:
+        aid = existing_aid
+        agents[aid]["agent_role"] = _normalize_agent_role(agent_role)
+        agents[aid]["task_focus"] = task_focus
+        agents[aid]["last_activity"] = time.time()
+    else:
+        aid = f"{agent_platform}-{_id()}"
+        agents[aid] = {
+            "agent_name": agent_name,
+            "agent_platform": agent_platform,
+            "agent_role": _normalize_agent_role(agent_role),
+            "task_focus": task_focus,
+            "status": AgentStatus.ACTIVE,
+            "joined_at": _now(),
+            "last_activity": time.time(),
+            "memories_written": 0,
+        }
+    _save_agt(agents)
+    return aid, rejoined, agents
+
+def _latest_handoff_lines(memories: list) -> tuple[Optional[dict], list[str]]:
+    handoffs = sorted(
+        [m for m in memories if m.get("memory_type") == MemoryType.HANDOFF],
+        key=lambda m: m.get("timestamp", 0),
+        reverse=True,
+    )
+    if not handoffs:
+        return None, []
+    lines = []
+    for raw in str(handoffs[0].get("content", "")).splitlines():
+        text = raw.strip()
+        if not text or text.startswith("##") or text.startswith("*") or text == "---":
+            continue
+        if re.match(r"^\d+\.\s+(Reviewer|Approve|Reject)", text) and len(lines) >= 2:
+            continue
+        lines.append(_compact_line(text, ONBOARD_STATUS_MAX_CHARS))
+        if len(lines) >= 2:
+            break
+    return handoffs[0], lines
+
+def _dedup_recent_kia(agents: dict) -> list[dict]:
+    recent = sorted(
+        [a for a in agents.values() if a.get("status") == AgentStatus.KIA],
+        key=lambda a: _agent_activity_ts(a),
+        reverse=True,
+    )
+    seen = set()
+    deduped = []
+    for agent in recent:
+        key = (agent.get("agent_name"), agent.get("agent_platform"))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(agent)
+        if len(deduped) >= ONBOARD_KIA_LIMIT:
+            break
+    return deduped
+
+def _onboard_ticket_groups(tickets: list, agent_name: str, agent_platform: str, agent_role: str) -> tuple[list, list, list]:
+    active_statuses = {
+        TicketStatus.OPEN,
+        TicketStatus.CLAIMED,
+        TicketStatus.IN_PROGRESS,
+        TicketStatus.CREATING_REPORT,
+        TicketStatus.SUBMITTED,
+        TicketStatus.REVIEWING,
+        TicketStatus.IN_REVIEW,
+        TicketStatus.REJECTED,
+    }
+    active = [t for t in tickets if t.get("status") in active_statuses]
+    assigned = []
+    role = _normalize_agent_role(agent_role)
+    for ticket in active:
+        assigned_to = (ticket.get("assigned_to") or "").lower()
+        claimed_by = (ticket.get("claimed_by") or "").lower()
+        status = ticket.get("status")
+        if (
+            agent_name.lower() in assigned_to
+            or agent_platform.lower() in assigned_to
+            or agent_name.lower() == claimed_by
+            or (role in COORDINATOR_ROLES and status in (TicketStatus.SUBMITTED, TicketStatus.REVIEWING, TicketStatus.IN_REVIEW))
+        ):
+            assigned.append(ticket)
+    queue = [t for t in active if t not in assigned]
+    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    sorter = lambda t: (priority_order.get(t.get("priority"), 9), -t.get("timestamp", 0))
+    return active, sorted(assigned, key=sorter), sorted(queue, key=sorter)
+
+def _ticket_summary_line(ticket: dict) -> str:
+    return f"`{ticket.get('id')}` ({ticket.get('status', '?')}): {_compact_line(ticket.get('title', 'Untitled'), 75)}"
+
+def _onboard_pinned(memories: list) -> list[dict]:
+    type_order = {"blocker": 0, "warning": 1, "decision": 2, "checkpoint": 3}
+    pinned = [m for m in memories if m.get("pinned") and m.get("memory_type") != MemoryType.HANDOFF]
+    return sorted(
+        pinned,
+        key=lambda m: (type_order.get(m.get("memory_type"), 9), -m.get("timestamp", 0)),
+    )[:ONBOARD_PINNED_LIMIT]
+
+def _format_compact_onboard(params: OnboardInput, aid: str, rejoined: bool, agents: dict) -> str:
+    prj = _load_prj()
+    mem = _load_mem()
+    tickets = _load_ticket_index()
+    role = _normalize_agent_role(params.agent_role)
+    active_others = sorted(
+        [a for a in agents.values()
+         if a.get("status") == AgentStatus.ACTIVE
+         and not (a.get("agent_name") == params.agent_name and a.get("agent_platform") == params.agent_platform)],
+        key=lambda a: _agent_activity_ts(a),
+        reverse=True,
+    )
+    latest_handoff, handoff_lines = _latest_handoff_lines(mem)
+    active_tickets, assigned_tickets, queue_tickets = _onboard_ticket_groups(tickets, params.agent_name, params.agent_platform, role)
+    warnings = _doctor_data_integrity(agents, tickets, mem) if params.include_health else []
+    project_name = Path(str(prj.get("project_root") or PROJECT_ROOT)).name or PROJECT_ROOT.name
+
+    lines = [
+        _on_board_protocol_xml(),
+        "",
+        f"# On Board: `{params.agent_name}`",
+        f"Platform: `{params.agent_platform}` | Role: `{role}` | Project: `{project_name}`",
+        "",
+        "## Join",
+        f"- {'Rejoined' if rejoined else 'Session active'} for `{params.agent_name}`.",
+        f"- Session id: `{aid}`.",
+        f"- Use `agent_name=\"{params.agent_name}\"` on writes, ticket mutations, checkpoints, and handoff.",
+    ]
+    if params.task_focus:
+        lines.append(f"- Agenda: {_compact_line(params.task_focus, 120)}")
+    if params.agent_name == params.agent_platform or len(params.agent_name) < 5 or params.agent_name[0].isupper():
+        lines.append("- Naming tip: use a stable lowercase role name; avoid dates, model names, and session ids.")
+
+    lines.extend(["", "## Active Agents / Collision Check"])
+    if active_others:
+        for agent in active_others[:5]:
+            focus = _compact_line(agent.get("task_focus") or "no agenda recorded", 90)
+            lines.append(f"- `{agent.get('agent_name')}` ({agent.get('agent_platform')}, {agent.get('agent_role', 'main')}): {focus}; idle ~{_minutes_ago(agent.get('last_activity'))}")
+    else:
+        lines.append("- No other active agents recorded.")
+
+    lines.extend(["", "## Recent KIA / Left Agents"])
+    recent_kia = _dedup_recent_kia(agents)
+    if recent_kia:
+        for agent in recent_kia:
+            reason = agent.get("kia_reason") or "kia"
+            lines.append(f"- `{agent.get('agent_name')}` ({agent.get('agent_platform')}): {reason}; ~{_minutes_ago(_agent_activity_ts(agent))} ago")
+    else:
+        lines.append("- None recent.")
+
+    lines.extend(["", "## Project Brief"])
+    lines.append(_compact_line(prj.get("description") or "No project description recorded.", ONBOARD_PROJECT_MAX_CHARS))
+
+    lines.extend(["", "## Current Status"])
+    if latest_handoff:
+        lines.append(f"Latest handoff: `{_compact_line(latest_handoff.get('title', 'Handoff'), 90)}` from `{latest_handoff.get('agent_name', '?')}`.")
+        for text in handoff_lines:
+            lines.append(f"- {text}")
+    else:
+        lines.append("- No handoff recorded.")
+    if params.focus_area:
+        lines.append(f"- Focus requested: {_compact_line(params.focus_area, 120)}")
+
+    if params.include_tickets:
+        lines.extend(["", "## Open Tickets", f"- Active ticket count: {len(active_tickets)}"])
+        if params.ticket_id:
+            focus = next((t for t in active_tickets if t.get("id") == params.ticket_id), None)
+            lines.append(f"- Focus ticket: {_ticket_summary_line(focus) if focus else f'`{params.ticket_id}` not found in active queue'}")
+        if assigned_tickets:
+            lines.append("- Pending/assigned for you:")
+            for ticket in assigned_tickets[:ONBOARD_ASSIGNED_TICKET_LIMIT]:
+                lines.append(f"  - {_ticket_summary_line(ticket)}")
+            if len(assigned_tickets) > ONBOARD_ASSIGNED_TICKET_LIMIT:
+                lines.append(f"  - ... {len(assigned_tickets) - ONBOARD_ASSIGNED_TICKET_LIMIT} more; call `memory_list_tickets`.")
+        else:
+            lines.append("- Pending/assigned for you: none")
+        if queue_tickets:
+            lines.append("- Open queue top:")
+            for ticket in queue_tickets[:ONBOARD_QUEUE_TICKET_LIMIT]:
+                lines.append(f"  - {_ticket_summary_line(ticket)}")
+            if len(queue_tickets) > ONBOARD_QUEUE_TICKET_LIMIT:
+                lines.append(f"  - ... {len(queue_tickets) - ONBOARD_QUEUE_TICKET_LIMIT} more; call `memory_list_tickets`.")
+
+    pinned = _onboard_pinned(mem)
+    lines.extend(["", "## Pinned Critical Memory"])
+    if pinned:
+        for memory in pinned:
+            summary = memory.get("pinned_summary") or _pinned_summary(memory.get("title", ""), memory.get("content", ""))
+            lines.append(f"- [{str(memory.get('memory_type', '?')).upper()}] {_compact_line(memory.get('title', ''), 70)}: {_compact_line(summary, 110)}")
+    else:
+        lines.append("- None.")
+
+    if params.include_health:
+        lines.extend(["", "## Data Health"])
+        if warnings:
+            lines.append(f"- {len(warnings)} warning(s); call `memory_doctor` for details.")
+        else:
+            lines.append("- OK")
+
+    lines.extend([
+        "",
+        "## Where Details Live",
+        "- Full context/digests/history: `memory_get_briefing(mode=\"normal\")` or `mode=\"deep\"`.",
+        "- Ticket details/claim/review: `memory_list_tickets`, `memory_claim_ticket`, `memory_review_ticket`.",
+        "- Recent memory/search/linkage: `memory_read`, `memory_search`, `memory_links`.",
+        "- Setup/data/token issues: `memory_doctor`, `memory_status`, `memory_token_usage`.",
+        "",
+        "## Next Commands",
+        "- `memory_get_briefing(mode=\"normal\")` only when you need more context.",
+        "- `memory_list_tickets` before ticket work.",
+        "- `memory_write` only after meaningful changes.",
+        "- `memory_handoff` before leaving.",
+    ])
+    return "\n".join(lines)
+
 @mcp.tool(name="memory_init", annotations={"title":"Initialize Project Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_init(params: ProjectInitInput) -> str:
     """Initialize .agent-mem/ in the project root. Call once per project. Safe to re-call."""
@@ -819,28 +1072,12 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
     Your agent_name is stamped on EVERY write for traceability."""
     prj = _load_prj()
     if not prj: return "Error: Not initialized. Call `memory_init` first."
-    _lazy_kia_sweep()  # clean up idle agents before joining
-    agents = _load_agt()
-    # Update existing active entry if same name+platform, otherwise create new
-    existing_aid = next(
-        (k for k, v in agents.items()
-         if v.get("agent_name") == params.agent_name
-         and v.get("agent_platform") == params.agent_platform
-         and v.get("status") == AgentStatus.ACTIVE),
-        None
+    aid, rejoined, agents = _join_agent_session(
+        params.agent_name,
+        params.agent_platform,
+        params.agent_role,
+        params.task_focus,
     )
-    rejoined = existing_aid is not None
-    if rejoined:
-        aid = existing_aid
-        agents[aid]["agent_role"] = _normalize_agent_role(params.agent_role)
-        agents[aid]["task_focus"] = params.task_focus
-        agents[aid]["last_activity"] = time.time()
-    else:
-        aid = f"{params.agent_platform}-{_id()}"
-        agents[aid] = {"agent_name": params.agent_name, "agent_platform": params.agent_platform,
-                       "agent_role": _normalize_agent_role(params.agent_role), "task_focus": params.task_focus, "status": AgentStatus.ACTIVE,
-                       "joined_at": _now(), "last_activity": time.time(), "memories_written": 0}
-    _save_agt(agents)
     status_line = "🔄 **Rejoined**" if rejoined else "🟢 **On Board**"
     lines = [f"{status_line}: `{params.agent_name}` ({params.agent_platform})", f"ID: `{aid}`", ""]
     # Naming warning
@@ -889,57 +1126,17 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
 
 @mcp.tool(name="memory_onboard", annotations={"title":"On Board Agent Session","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
 async def memory_onboard(params: OnboardInput) -> str:
-    """One-call session entrypoint: register the agent, read briefing, inspect tickets, and surface data-health warnings."""
+    """Compact session entrypoint: join, collision-check, and show current working context."""
     if not _load_prj():
         return "No .agent-mem/ found. Run `memory_init`."
 
-    join_output = await memory_agent_join(AgentJoinInput(
-        agent_name=params.agent_name,
-        agent_platform=params.agent_platform,
-        agent_role=params.agent_role,
-        task_focus=params.task_focus,
-    ))
-    briefing_output = await memory_get_briefing(BriefingInput(
-        mode=params.mode,
-        ticket_id=params.ticket_id,
-        focus_area=params.focus_area,
-        token_budget=params.token_budget,
-        suppress_protocol=True,
-    ))
-
-    lines = [
-        _on_board_protocol_xml(),
-        "",
-        f"# 🚢 On Board Session: `{params.agent_name}`",
-        f"*Platform: `{params.agent_platform}` | Role: `{_normalize_agent_role(params.agent_role)}`*",
-    ]
-    if params.task_focus:
-        lines.append(f"*Focus: {params.task_focus}*")
-    lines.extend(["", "## Agent Registration", join_output, "", "## Briefing", briefing_output])
-
-    if params.include_tickets:
-        tickets_output = await memory_list_tickets(ListTicketsInput(include_closed=False))
-        lines.extend(["", "## Open Tickets", tickets_output])
-
-    if params.include_health:
-        warnings = _doctor_data_integrity(_load_agt(), _load_ticket_index(), _load_mem())
-        lines.append("")
-        lines.append("## Data Health")
-        if warnings:
-            lines.extend(warnings[:12])
-            if len(warnings) > 12:
-                lines.append(f"- ... {len(warnings) - 12} more warnings. Run `memory_doctor()` for full detail.")
-        else:
-            lines.append("- ✅ No data-integrity warnings.")
-
-    lines.extend([
-        "",
-        "## Next",
-        f"- Use `agent_name=\"{params.agent_name}\"` on every write, ticket mutation, checkpoint, and handoff.",
-        "- Use `memory_write` after meaningful changes only.",
-        "- Use `memory_handoff` before leaving the task.",
-    ])
-    return "\n".join(lines)
+    aid, rejoined, agents = _join_agent_session(
+        params.agent_name,
+        params.agent_platform,
+        params.agent_role,
+        params.task_focus,
+    )
+    return _format_compact_onboard(params, aid, rejoined, agents)
 
 @mcp.tool(name="memory_write", annotations={"title":"Write Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
 async def memory_write(params: MemoryWriteInput) -> str:
@@ -955,12 +1152,14 @@ async def memory_write(params: MemoryWriteInput) -> str:
             f"Exact same memory was written recently. Link to the existing entry instead of adding noise.\n"
             f"**{duplicate['title']}**"
         )
+    priority = params.priority or 0
+    is_pinned = priority >= 3
     entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": params.memory_type,
              "title": params.title, "content": params.content, "tags": params.tags or [],
              "related_files": params.related_files or [], "related_tickets": params.related_tickets or [],
-             "priority": params.priority or 0,
-             "pinned": (params.priority or 0) >= 3, "created_at": _now(), "timestamp": time.time()}
-    mem.append(entry); _save_mem(mem)
+             "priority": priority,
+             "pinned": is_pinned, "created_at": _now(), "timestamp": time.time()}
+    mem.append(_finalize_memory_entry(entry, params.pinned_summary)); _save_mem(mem)
     agents = _load_agt()
     for a in agents.values():
         if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
@@ -973,7 +1172,8 @@ async def memory_write(params: MemoryWriteInput) -> str:
     if entry["related_files"]:
         links.append("files: " + ", ".join(f"`{f}`" for f in entry["related_files"][:5]))
     link_line = "\n" + " | ".join(links) if links else ""
-    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*(params.priority or 0) or '⚪'}\n**{params.title}**{link_line}"
+    summary_line = f"\n📌 Pinned summary: {entry['pinned_summary']}" if is_pinned else ""
+    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}"
 
 @mcp.tool(name="memory_read", annotations={"title":"Read Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_read(params: MemoryReadInput) -> str:
@@ -1162,7 +1362,7 @@ async def memory_checkpoint(params: CheckpointInput) -> str:
              "title": f"Checkpoint: {params.summary[:80]}", "content": json.dumps(cpd, indent=2, default=str),
              "tags": ["checkpoint"], "related_files": [], "priority": 2, "pinned": True,
              "created_at": _now(), "timestamp": time.time()}
-    mem.append(entry); _save_mem(mem)
+    mem.append(_finalize_memory_entry(entry)); _save_mem(mem)
     ts = _local_now().strftime("%Y%m%d_%H%M%S")
     cp_file = MEMORY_DIR / "checkpoints" / f"cp_{params.agent_name}_{ts}.json"
     _save(cp_file, cpd)
@@ -1183,7 +1383,7 @@ async def memory_handoff(params: HandoffInput) -> str:
              "title": f"Handoff from {params.agent_name}", "content": content,
              "tags": ["handoff"], "related_files": (params.files_modified or [])+(params.files_created or []),
              "priority": 3, "pinned": True, "created_at": _now(), "timestamp": time.time()}
-    mem.append(entry); _save_mem(mem)
+    mem.append(_finalize_memory_entry(entry)); _save_mem(mem)
     agents = _load_agt()
     for a in agents.values():
         if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
@@ -1303,8 +1503,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
     if include_detail_sections and pinned:
         _add("## 📌 Pinned")
         for m in pinned[-8:]:
-            max_content = min(300, (budget - used) // 4)
-            c = m["content"][:max_content] + ("..." if len(m["content"]) > max_content else "")
+            c = m.get("pinned_summary") or _pinned_summary(m.get("title", ""), m.get("content", ""))
             if not _add(f"- [{m['memory_type'].upper()}] **{m['title']}** (`{m['agent_name']}`): {c}"):
                 break
         _add("")
@@ -1422,7 +1621,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
 
     if not params.suppress_protocol:
         L += ["## 🚨 GET ON BOARD — MANDATORY PROTOCOL",
-              "**STEP 1**: `memory_onboard(agent_name='your-stable-name', agent_platform='your-platform')` — preferred one-call session entrypoint",
+              "**STEP 1**: `memory_onboard(agent_name='your-stable-name', agent_platform='your-platform')` — preferred compact session entrypoint",
               "**Fallback**: if you already read this briefing, call `memory_agent_join` before any write/ticket mutation",
               "**STEP 2**: `memory_write` after significant code changes, decisions, discoveries, blockers, or warnings",
               "**STEP 3**: `memory_checkpoint` every 10-15 min — if you die, this is all the next agent has",
@@ -1523,16 +1722,6 @@ async def memory_doctor() -> str:
     else:
         lines.append("Setup looks complete. Use `memory_get_briefing(mode='brief')` for a quick runtime check.")
     return "\n".join(lines)
-
-@mcp.tool(name="memory_pin", annotations={"title":"Pin/Unpin","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
-async def memory_pin(params: PinInput) -> str:
-    """Pin/unpin a memory."""
-    mem = _load_mem()
-    for m in mem:
-        if m["id"] == params.memory_id:
-            m["pinned"] = params.pinned; _save_mem(mem)
-            return f"{'📌 Pinned' if params.pinned else '📍 Unpinned'}: {m['title']}"
-    return f"ID '{params.memory_id}' not found."
 
 @mcp.tool(name="memory_update_state", annotations={"title":"Update State","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_update_state(params: UpdateStateInput) -> str:
@@ -1905,12 +2094,12 @@ async def memory_bootstrap(params: BootstrapInput) -> str:
     discoveries = []
 
     def _add_entry(mtype, title, content, tags=None, priority=0):
-        entries.append({
+        entries.append(_finalize_memory_entry({
             "id": _id(), "agent_name": params.agent_name, "memory_type": mtype,
             "title": title, "content": content, "tags": tags or [],
             "related_files": [], "priority": priority,
             "pinned": priority >= 3, "created_at": _now(), "timestamp": time.time()
-        })
+        }))
 
     # ── Scan README ──
     if params.scan_readme:
@@ -2417,7 +2606,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
 
             # Write handoff memory
             mem = _load_mem()
-            mem.append({
+            mem.append(_finalize_memory_entry({
                 "id": _id(), "agent_name": params.agent_name,
                 "memory_type": MemoryType.HANDOFF,
                 "title": f"Auto-handoff after submitting {t['id']}",
@@ -2432,7 +2621,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
                 "related_files": params.files_changed or [],
                 "priority": 3, "pinned": True,
                 "created_at": _now(), "timestamp": time.time()
-            })
+            }))
             _save_mem(mem)
 
             return (
@@ -2565,14 +2754,14 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
 
                 # Log as memory
                 mem = _load_mem()
-                mem.append({
+                mem.append(_finalize_memory_entry({
                     "id": _id(), "agent_name": params.agent_name,
                     "memory_type": MemoryType.WARNING,
                     "title": f"❌ Rejected {t['id']}: {t['title']}",
                     "content": f"Rejected work by `{t.get('claimed_by','?')}`. {params.review_notes[:200]}\nFix: {(params.fix_instructions or 'See rejection note')[:200]}",
                     "tags": ["ticket","rejected"], "related_files": [],
                     "priority": 2, "pinned": True, "created_at": _now(), "timestamp": time.time()
-                })
+                }))
                 _save_mem(mem)
 
                 # Auto-handoff reviewer — ticket reopened, next agent will see it
@@ -2691,7 +2880,7 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
     return "\n".join(lines)
 
 
-@mcp.prompt(name="on-board", description="Join the project and get the full briefing — always run this first.")
+@mcp.prompt(name="on-board", description="Join the project and get compact current context — always run this first.")
 def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-desktop") -> str:
     return (
         f"You are joining a shared multi-agent project. Follow these steps in order:\n\n"
@@ -2699,7 +2888,7 @@ def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-de
         f"   - agent_name: \"{agent_name}\"\n"
         f"   - agent_platform: \"{agent_platform}\"\n"
         f"   - mode: \"normal\"\n\n"
-        f"2. Report back: who is active, what tickets are open, and what was the last decision or handoff.\n\n"
+        f"2. Report back: who is active, what tickets need attention, and what details you will load next if needed.\n\n"
         f"Do not start any work until `memory_onboard` has completed."
     )
 

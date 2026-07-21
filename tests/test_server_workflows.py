@@ -151,6 +151,22 @@ def test_briefing_hides_type_header_when_all_entries_are_pinned(tmp_path):
 def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     server = load_server(tmp_path)
     seed_project(server)
+    mem = server._load_mem()
+    mem.append({
+        "id": "m3",
+        "agent_name": "codex-main",
+        "memory_type": "warning",
+        "title": "Critical deploy warning",
+        "content": "Do not replace production bindings with placeholder values.",
+        "pinned_summary": "Production bindings must stay real; placeholders break deploys.",
+        "tags": ["deploy"],
+        "related_files": [],
+        "priority": 3,
+        "pinned": True,
+        "created_at": "2026-05-08T12:06:00",
+        "timestamp": time.time(),
+    })
+    server._save_mem(mem)
     server._tickets_dir()
     server._save_ticket_index([
         {
@@ -183,16 +199,25 @@ def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     )))
     agents = server._load_agt()
 
-    assert "On Board Session" in output
+    assert "# On Board: `codex-main`" in output
     assert "codex-main" in output
-    assert "Ticket Focus" in output
+    assert "Active Agents / Collision Check" in output
+    assert "Current Status" in output
+    assert "Pending/assigned for you" in output
     assert "TK-abc" in output
     assert "Open Tickets" in output
+    assert "Pinned Critical Memory" in output
+    assert "Production bindings must stay real" in output
     assert "Data Health" in output
+    assert "Where Details Live" in output
+    assert "memory_get_briefing" in output
+    assert "## Briefing" not in output
+    assert "Ticket Focus" not in output
+    assert "Required Fields" not in output
+    assert "Long-term Memory" not in output
     assert "<on_board_protocol>" in output
     assert "<required_first_call>memory_onboard</required_first_call>" in output
     assert "<ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>" in output
-    assert "preferred one-call session entrypoint" not in output
     assert any(a["agent_name"] == "codex-main" and a["status"] == "active" for a in agents.values())
 
 
@@ -535,6 +560,130 @@ def test_memory_write_skips_exact_recent_duplicate_and_preserves_ticket_links(tm
     assert "Duplicate skipped" in second
     assert len(memories) == 1
     assert memories[0]["related_tickets"] == ["TK-abc"]
+
+
+def test_priority_three_memory_auto_pins_with_compact_summary_and_raw_content(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({
+        "a1": {
+            "agent_name": "codex-main",
+            "agent_platform": "codex",
+            "status": "active",
+            "memories_written": 0,
+            "last_activity": time.time(),
+        }
+    })
+    raw_content = ("Critical rule. " + ("Keep the raw details intact. " * 40)).strip()
+
+    output = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main",
+        memory_type="warning",
+        title="Critical pinned warning",
+        content=raw_content,
+        priority=3,
+    )))
+    memory = server._load_mem()[0]
+    briefing = asyncio.run(server.memory_get_briefing(server.BriefingInput(mode="brief", token_budget=8000)))
+
+    assert memory["pinned"] is True
+    assert memory["content"] == raw_content
+    assert memory["pinned_summary"].startswith("Critical rule.")
+    assert len(memory["pinned_summary"]) <= server.PINNED_SUMMARY_MAX_CHARS
+    assert "Pinned summary" in output
+    assert memory["pinned_summary"] in briefing
+
+
+def test_auto_pinned_system_memories_get_compact_summary(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    now = time.time()
+    server._save_agt({
+        "worker": {
+            "agent_name": "codex-worker",
+            "agent_platform": "codex",
+            "status": "active",
+            "memories_written": 0,
+            "last_activity": now,
+        },
+        "reviewer": {
+            "agent_name": "codex-reviewer",
+            "agent_platform": "codex",
+            "agent_role": "reviewer",
+            "status": "active",
+            "memories_written": 0,
+            "last_activity": now,
+        },
+    })
+    server._tickets_dir()
+    server._save_ticket_index([
+        {
+            "id": "TK-submit",
+            "title": "Submit ticket",
+            "description": "Submit should write auto-handoff memory.",
+            "target_url": "local",
+            "scope": "READ-ONLY",
+            "required_fields": ["result"],
+            "priority": "medium",
+            "status": "claimed",
+            "created_by": "planner",
+            "assigned_to": None,
+            "claimed_by": "codex-worker",
+            "created_at": "2026-05-08T12:01:00",
+            "updated_at": "2026-05-08T12:01:00",
+            "timestamp": now,
+        },
+        {
+            "id": "TK-review",
+            "title": "Review ticket",
+            "description": "Reject should write pinned warning memory.",
+            "target_url": "local",
+            "scope": "READ-ONLY",
+            "required_fields": ["result"],
+            "priority": "medium",
+            "status": "submitted",
+            "created_by": "planner",
+            "assigned_to": None,
+            "claimed_by": "codex-worker",
+            "created_at": "2026-05-08T12:01:00",
+            "updated_at": "2026-05-08T12:01:00",
+            "timestamp": now,
+        },
+    ])
+
+    asyncio.run(server.memory_handoff(server.HandoffInput(
+        agent_name="codex-worker",
+        summary="handoff summary",
+        next_steps=["continue"],
+    )))
+    server._save_agt({
+        **server._load_agt(),
+        "worker-2": {
+            "agent_name": "codex-worker",
+            "agent_platform": "codex",
+            "status": "active",
+            "memories_written": 0,
+            "last_activity": now,
+        },
+    })
+    asyncio.run(server.memory_submit_ticket(server.SubmitTicketInput(
+        agent_name="codex-worker",
+        ticket_id="TK-submit",
+        summary="submitted work",
+    )))
+    asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer",
+        ticket_id="TK-review",
+        verdict="reject",
+        review_notes="not enough evidence",
+        fix_instructions="add proof",
+    )))
+
+    pinned = [m for m in server._load_mem() if m.get("pinned")]
+
+    assert len(pinned) == 3
+    assert all(m.get("pinned_summary") for m in pinned)
+    assert all(len(m["pinned_summary"]) <= server.PINNED_SUMMARY_MAX_CHARS for m in pinned)
 
 
 def test_memory_links_shows_ticket_file_and_agent_linkage(tmp_path):
