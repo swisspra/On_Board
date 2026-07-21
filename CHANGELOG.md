@@ -1,12 +1,16 @@
 # Changelog
 
-## v3.7.1 — MCP SDK Security Update (2026-07-21)
+## v3.7.1 — Safer Setup, Compact Onboarding, MCP SDK Security (2026-07-21)
 
-**Security patch for the open Dependabot MCP Python SDK alerts.**
+**Current GitHub Release collecting all major changes after v3.5.2, plus a security patch for the open Dependabot MCP Python SDK alerts.**
 
 ### Changed
+- GitHub Release notes now include the v3.6.0 safer setup/update workflow and v3.7.0 compact onboarding changes.
 - Updated locked `mcp` dependency from `1.27.1` to `1.28.1`.
 - No On Board behavior changes from v3.7.0.
+
+### Removed
+- Removed the old root `index.html` GitHub Pages landing page.
 
 ### Upgrade
 ```bash
