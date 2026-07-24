@@ -5,17 +5,19 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.1.7
       
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v5.1.0
         with:
           python-version: '3.11'
       
@@ -28,4 +30,4 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+          attestations: true
