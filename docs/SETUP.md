@@ -291,6 +291,59 @@ Then initialize memory from your first chat (see
 [Initialize project memory](#initialize-project-memory)). `memory_init` creates
 `.agent-mem/` for you — there are no files to write by hand.
 
+### Per-IDE examples (headless binary)
+
+The server is the same everywhere; only the config file and format differ. Use
+the bare command for CLI clients and the absolute path (`which onboard-memory-mcp`)
+for GUI clients. Set `AGENT_PROJECT_DIR` to your project's absolute path — it is
+the portable choice across every client.
+
+**Claude Code** — add it with the CLI (verified connected):
+
+```bash
+claude mcp add agent-memory -e AGENT_PROJECT_DIR=/full/path/to/your/project -- onboard-memory-mcp
+```
+
+or commit a project `.mcp.json`:
+
+```json
+{ "mcpServers": { "agent-memory": {
+  "command": "onboard-memory-mcp",
+  "env": { "AGENT_PROJECT_DIR": "/full/path/to/your/project" } } } }
+```
+
+**Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json`
+(macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows). GUI app, so
+use the absolute binary path:
+
+```json
+{ "mcpServers": { "agent-memory": {
+  "command": "/opt/homebrew/bin/onboard-memory-mcp",
+  "env": { "AGENT_PROJECT_DIR": "/full/path/to/your/project" } } } }
+```
+
+**Cursor** — `.cursor/mcp.json`. Cursor expands `${workspaceFolder}`:
+
+```json
+{ "mcpServers": { "agent-memory": {
+  "command": "/opt/homebrew/bin/onboard-memory-mcp",
+  "env": { "AGENT_PROJECT_DIR": "${workspaceFolder}" } } } }
+```
+
+**Codex** — `~/.codex/config.toml` (TOML; no variable expansion, use an absolute
+path):
+
+```toml
+[mcp_servers.agent-memory]
+command = "onboard-memory-mcp"
+env = { AGENT_PROJECT_DIR = "/full/path/to/your/project" }
+```
+
+Any other `mcpServers`-style client (Windsurf, Antigravity, VS Code) uses the
+same JSON shape. On Board also reads `CURSOR_PROJECT_DIR` and `CLAUDE_PROJECT_DIR`
+as fallbacks when the client exports them, but setting `AGENT_PROJECT_DIR`
+explicitly avoids surprises.
+
 ## Option 3: Advanced manual setup
 
 Use this if you do not want to run `setup-project.sh`.
