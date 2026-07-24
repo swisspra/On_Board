@@ -4,7 +4,7 @@
 > One MCP server, one project memory folder, many IDEs and agent clients.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)]()
+[![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)](https://modelcontextprotocol.io)
 [![MCP Badge](https://lobehub.com/badge/mcp/swisspra-on_board)](https://lobehub.com/mcp/swisspra-on_board)
 
 ---
@@ -75,12 +75,12 @@ the setup paths below.
 
 Choose one setup path:
 
-### Option 1: Agent setup
+#### Option 1: Agent setup
 
 Ask an agent to read [AGENT_SETUP.md](./AGENT_SETUP.md) and help you set up the
 project. This is the easiest path if you already have an agent available.
 
-### Option 2: Script setup
+#### Option 2: Script setup
 
 ```bash
 git clone https://github.com/swisspra/On_Board.git
@@ -124,7 +124,7 @@ agents to re-onboard too often.
 Optional: add `AGENT_MEM_CONTEXT_DIRS` to the generated MCP config when agents
 should read shared docs/specs outside the project folder.
 
-### Option 3: Advanced manual setup
+#### Option 3: Advanced manual setup
 
 If you do not want to run the setup script, install with `uv sync`, write the
 MCP config yourself, and add project rules/hooks manually. See
