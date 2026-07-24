@@ -231,13 +231,17 @@ Use this if you installed the server from a package manager instead of cloning
 the repo:
 
 ```bash
-brew install swisspra/tap/onboard    # or:
-pipx install onboard-memory-mcp      # or:
+brew install swisspra/tap/onboard-memory   # or:
+pipx install onboard-memory-mcp            # or:
 uv tool install onboard-memory-mcp
 ```
 
+After `brew tap swisspra/tap`, the short `brew install onboard-memory` also
+works. On Homebrew 6+, the first install of a non-official tap asks you to trust
+it — approve the prompt or run `brew trust swisspra/tap`.
+
 All three publish the same `onboard-memory-mcp` command (Homebrew also adds a
-short `onboard` alias). Homebrew is macOS and Linux only; on Windows use pipx or
+short `onboard-memory` alias). Homebrew is macOS and Linux only; on Windows use pipx or
 uv, where the command is `onboard-memory-mcp.exe`. There is no `setup-project.sh`
 run, so you wire the MCP client by hand and there is no generated config, agent
 rules, hooks, or dashboard launcher. The memory, ticket, and handoff tools work
@@ -283,7 +287,7 @@ The generic template is `configs/binary-mcp.json`.
 needed — on **Python 3.11+** for Linux (x86_64/arm64), Windows (x86_64), and
 Apple-Silicon macOS. On **Python 3.10 or Intel macOS**, a couple of dependencies
 (`rpds-py`, `cryptography`) may build from source and need a C/Rust toolchain; on
-macOS or Linux you can instead use `brew install swisspra/tap/onboard`, which
+macOS or Linux you can instead use `brew install swisspra/tap/onboard-memory`, which
 builds against a pinned Python 3.12 and needs no preinstalled Python. Homebrew is
 not available on Windows.
 

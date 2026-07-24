@@ -56,8 +56,8 @@ The server is published as [`onboard-memory-mcp`](https://pypi.org/project/onboa
 Install it with whichever tool you prefer:
 
 ```bash
-# Homebrew
-brew install swisspra/tap/onboard
+# Homebrew (tap once, then the short name works: brew install onboard-memory)
+brew install swisspra/tap/onboard-memory
 
 # pipx
 pipx install onboard-memory-mcp
@@ -67,10 +67,11 @@ uv tool install onboard-memory-mcp
 ```
 
 All three provide the `onboard-memory-mcp` command (Homebrew also adds a short
-`onboard` alias). Homebrew covers macOS and Linux; on **Windows** use pipx or
-uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's `command`
-at it instead of `python3 onboard_server.py`. You can also skip this and run
-from a clone using the setup paths below.
+`onboard-memory` alias). Homebrew covers macOS and Linux; on **Windows** use
+pipx or uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's
+`command` at it instead of `python3 onboard_server.py`. You can also skip this
+and run from a clone using the setup paths below. (On Homebrew 6+, approve the
+one-time tap-trust prompt, or run `brew trust swisspra/tap`.)
 
 #### Headless config (no clone)
 
