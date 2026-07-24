@@ -27,6 +27,4 @@ jobs:
         run: python -m build
       
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1
-        with:
-          attestations: true
+        uses: pypa/gh-action-pypi-publish@release/v1
