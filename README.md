@@ -50,6 +50,29 @@ review important changes, and accept the final result.
 
 ## Quick start
 
+### Install the server
+
+The server is published as [`onboard-memory-mcp`](https://pypi.org/project/onboard-memory-mcp/).
+Install it with whichever tool you prefer:
+
+```bash
+# Homebrew
+brew install swisspra/tap/onboard
+
+# pipx
+pipx install onboard-memory-mcp
+
+# uv
+uv tool install onboard-memory-mcp
+```
+
+All three provide the `onboard-memory-mcp` command (Homebrew also adds a short
+`onboard` alias). Point your MCP client's `command` at it instead of
+`python3 onboard_server.py`. You can also skip this and run from a clone using
+the setup paths below.
+
+### Set up a project
+
 Choose one setup path:
 
 ### Option 1: Agent setup
