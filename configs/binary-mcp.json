@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "onboard-memory-mcp",
+      "env": {
+        "AGENT_PROJECT_DIR": "/full/path/to/your/project",
+        "AGENT_MEM_CONTEXT_DIRS": "/path/to/docs:/path/to/specs"
+      }
+    }
+  }
+}

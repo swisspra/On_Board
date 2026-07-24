@@ -37,7 +37,10 @@ jobs:
         run: uv run python -m py_compile server.py dashboard_live.py
 
       - name: Validate JSON templates
-        run: uv run python -m json.tool configs/uv-mcp.json > /dev/null
+        run: |
+          for f in configs/*.json; do
+            uv run python -m json.tool "$f" > /dev/null
+          done
 
       - name: Validate shell scripts
         run: |

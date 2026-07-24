@@ -225,6 +225,72 @@ bash /full/path/to/On_Board/doctor.sh /full/path/to/your/project
 This regenerates `.onboard/` config, startup hooks, and rules. It does not
 delete `.agent-mem/` project memory.
 
+## Headless install (Homebrew, pipx, or uv)
+
+Use this if you installed the server from a package manager instead of cloning
+the repo:
+
+```bash
+brew install swisspra/tap/onboard    # or:
+pipx install onboard-memory-mcp      # or:
+uv tool install onboard-memory-mcp
+```
+
+All three publish the same `onboard-memory-mcp` command (Homebrew also adds a
+short `onboard` alias). Homebrew is macOS and Linux only; on Windows use pipx or
+uv, where the command is `onboard-memory-mcp.exe`. There is no `setup-project.sh`
+run, so you wire the MCP client by hand and there is no generated config, agent
+rules, hooks, or dashboard launcher. The memory, ticket, and handoff tools work
+fully; only those local conveniences are skipped. (You can still clone and run
+`setup-project.sh` later if you want the rules, hooks, and dashboard.)
+
+Point your client at the installed command:
+
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "onboard-memory-mcp",
+      "env": {
+        "AGENT_PROJECT_DIR": "/full/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+- CLI clients (Claude Code, Codex) inherit your shell `PATH`, so the bare
+  `onboard-memory-mcp` command works.
+- GUI clients (Claude Desktop, Cursor) launch with a minimal `PATH` that usually
+  excludes the install location, so bare commands fail to start. Use the
+  absolute path from `which onboard-memory-mcp` (`where onboard-memory-mcp` on
+  Windows) as `command` — typically:
+  - `/opt/homebrew/bin/onboard-memory-mcp` (Homebrew, Apple Silicon)
+  - `/usr/local/bin/onboard-memory-mcp` (Homebrew, Intel)
+  - `/home/linuxbrew/.linuxbrew/bin/onboard-memory-mcp` (Homebrew, Linux)
+  - `~/.local/bin/onboard-memory-mcp` (pipx or uv tool, macOS/Linux)
+  - `%USERPROFILE%\.local\bin\onboard-memory-mcp.exe` (pipx or uv tool, Windows)
+- `AGENT_PROJECT_DIR` is required; it tells On Board which project owns the
+  `.agent-mem/` memory folder. If it is unset, On Board falls back to the MCP
+  client's working directory, which is often not what you want — set it
+  explicitly.
+- `AGENT_MEM_CONTEXT_DIRS` (colon-separated) is optional; add it to expose extra
+  docs/specs through `memory_context_dirs` and `memory_context_read`.
+
+The generic template is `configs/binary-mcp.json`.
+
+**Platform notes.** `pipx`/`uv` install from prebuilt wheels — no compiler
+needed — on **Python 3.11+** for Linux (x86_64/arm64), Windows (x86_64), and
+Apple-Silicon macOS. On **Python 3.10 or Intel macOS**, a couple of dependencies
+(`rpds-py`, `cryptography`) may build from source and need a C/Rust toolchain; on
+macOS or Linux you can instead use `brew install swisspra/tap/onboard`, which
+builds against a pinned Python 3.12 and needs no preinstalled Python. Homebrew is
+not available on Windows.
+
+Then initialize memory from your first chat (see
+[Initialize project memory](#initialize-project-memory)). `memory_init` creates
+`.agent-mem/` for you — there are no files to write by hand.
+
 ## Option 3: Advanced manual setup
 
 Use this if you do not want to run `setup-project.sh`.

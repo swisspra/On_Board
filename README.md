@@ -67,9 +67,46 @@ uv tool install onboard-memory-mcp
 ```
 
 All three provide the `onboard-memory-mcp` command (Homebrew also adds a short
-`onboard` alias). Point your MCP client's `command` at it instead of
-`python3 onboard_server.py`. You can also skip this and run from a clone using
-the setup paths below.
+`onboard` alias). Homebrew covers macOS and Linux; on **Windows** use pipx or
+uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's `command`
+at it instead of `python3 onboard_server.py`. You can also skip this and run
+from a clone using the setup paths below.
+
+#### Headless config (no clone)
+
+With the server installed, wire your MCP client to it directly — no repo
+checkout, no `setup-project.sh`:
+
+```json
+{
+  "mcpServers": {
+    "agent-memory": {
+      "command": "onboard-memory-mcp",
+      "env": { "AGENT_PROJECT_DIR": "/full/path/to/your/project" }
+    }
+  }
+}
+```
+
+- **CLI clients** (Claude Code, Codex) inherit your shell `PATH`, so the bare
+  `onboard-memory-mcp` works.
+- **GUI clients** (Claude Desktop, Cursor) launch with a minimal `PATH`. Use the
+  absolute path from `which onboard-memory-mcp` (`where` on Windows) as
+  `command` — typically `/opt/homebrew/bin/onboard-memory-mcp` (Homebrew, Apple
+  Silicon), `/usr/local/bin/onboard-memory-mcp` (Homebrew, Intel),
+  `/home/linuxbrew/.linuxbrew/bin/onboard-memory-mcp` (Homebrew, Linux),
+  `~/.local/bin/onboard-memory-mcp` (pipx / uv on macOS/Linux), or
+  `%USERPROFILE%\.local\bin\onboard-memory-mcp.exe` (pipx / uv on Windows).
+
+`AGENT_PROJECT_DIR` is required — it decides which project owns `.agent-mem/`.
+In your first chat, call `memory_init` once (creates `.agent-mem/`), then
+`memory_onboard` each session. Nothing to create by hand.
+
+The `pipx`/`uv` path installs from prebuilt wheels (no compiler) on Python 3.11+
+for Linux, Windows, and Apple-Silicon macOS; on Python 3.10 or Intel macOS a
+couple of Rust/C dependencies may build from source, so prefer `brew` there.
+Template: [configs/binary-mcp.json](./configs/binary-mcp.json); full detail and
+platform notes in [docs/SETUP.md](./docs/SETUP.md).
 
 ### Set up a project
 
