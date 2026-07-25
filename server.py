@@ -24,6 +24,8 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from mcp.server.fastmcp import FastMCP
 
+import a2a_wait
+
 # ── Config — PROJECT LOCAL ──────────────────────────────
 PROJECT_ROOT = Path(os.environ.get(
     "AGENT_PROJECT_DIR",
@@ -2860,6 +2862,121 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
     # Show folder structure hint
     lines.append("📁 `tickets/` = open queue | `tickets/review/` = submitted | `tickets/closed/` = done | `tickets/rejected/` = failed")
     return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════
+# A2A — blocking wait. Loop + rationale live in a2a_wait.py
+# ═══════════════════════════════════════════════════════
+
+def _watch_p(): return MEMORY_DIR / "watch.json"
+def _load_watch(): return _load(_watch_p()).get("agents", {})
+def _save_watch(w): _save(_watch_p(), {"agents": w})
+
+
+def _board_snapshot() -> dict:
+    """Current board keyed by id, so diffing never depends on list ordering."""
+    return {
+        "tickets": {t["id"]: t for t in _load_ticket_index() if t.get("id")},
+        "memories": {m["id"]: m for m in _load_mem() if m.get("id")},
+    }
+
+
+def _reduce_snapshot(snap: dict) -> dict:
+    """Shrink a snapshot to only the fields the diff actually reads.
+
+    Events are built from `cur`, which needs full ticket dicts. `prev` is read
+    for status/assigned_to alone, so persisting the reduced form keeps
+    watch.json small no matter how many tickets accumulate.
+    """
+    return {
+        "tickets": {k: {"status": v.get("status"),
+                        "assigned_to": v.get("assigned_to")}
+                    for k, v in snap.get("tickets", {}).items()},
+        "memories": {k: {} for k in snap.get("memories", {})},
+    }
+
+
+class WaitForEventInput(BaseModel):
+    agent_name: str = Field(description="Your agent name (must already be on board)")
+    kinds: Optional[List[str]] = Field(
+        default=None,
+        description="Kinds to wake on: ticket_created, ticket_status_changed, "
+                    "ticket_assigned, memory_written. Default: the three ticket kinds.")
+    timeout_s: int = Field(default=180, description="Seconds to park. Clamped to 200 unless long_wait.")
+    only_mine: bool = Field(default=True, description="Wake only on events assigned to you, unassigned, or on tickets you created")
+    long_wait: bool = Field(default=False, description="stdio clients (Claude Code) ONLY — allows up to 3600s. Never set from Claude Desktop: it cancels at ~240s and repeated cancels wedge every connected MCP server until restart.")
+
+
+@mcp.tool(name="memory_wait_for_event", annotations={"title":"Wait for Board Event","readOnlyHint":True,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+async def memory_wait_for_event(params: WaitForEventInput) -> str:
+    """Park until another agent acts, then return everything pending.
+
+    The listening half of On Board. Instead of a human relaying messages, an
+    agent blocks here until a peer creates a ticket, changes a status, or
+    assigns work.
+
+    Returns instantly if events piled up since your last call, so re-arming
+    after a gap costs one call rather than an empty wake. One wake drains the
+    whole queue. You never wake on your own actions.
+
+    Re-arm by calling it again — the cursor is stored per agent, so you carry
+    no bookkeeping.
+    """
+    err = _require_joined(params.agent_name)
+    if err: return err
+
+    baseline = _load_watch().get(params.agent_name)
+
+    result = await a2a_wait.wait_for_events(
+        _board_snapshot,
+        agent_name=params.agent_name,
+        baseline=baseline,
+        kinds=params.kinds,
+        only_mine=params.only_mine,
+        timeout_s=params.timeout_s,
+        desktop_safe=not params.long_wait,
+        heartbeat_fn=lambda: _touch_heartbeat(params.agent_name),
+    )
+
+    watch = _load_watch()   # re-read: a peer may have written while we parked
+    watch[params.agent_name] = _reduce_snapshot(result["snapshot"])
+    _save_watch(watch)
+
+    if result["status"] == "idle":
+        return (f"😴 Nothing in {result['timeout_s']}s — board unchanged.\n"
+                f"Call `memory_wait_for_event` again to keep listening.")
+
+    head = f"🔔 {result['event_count']} event(s) after {result['waited_s']}s"
+    if result["drained_backlog"]:
+        head += " (backlog drained)"
+    lines = [head]
+    for e in result["events"]:
+        k = e.get("kind")
+        if k == a2a_wait.TICKET_CREATED:
+            who = e.get("assigned_to") or "anyone"
+            lines.append(f"- 🆕 `{e['ticket_id']}` **{e['title']}** by `{e['created_by']}` → {who}")
+        elif k == a2a_wait.TICKET_STATUS_CHANGED:
+            lines.append(f"- 🎫 `{e['ticket_id']}` {e.get('previous_status')} → **{e['status']}** — {e['title']}")
+        elif k == a2a_wait.TICKET_ASSIGNED:
+            lines.append(f"- 📌 `{e['ticket_id']}` now assigned to **{e.get('assigned_to')}** — {e['title']}")
+        else:
+            lines.append(f"- 📝 {e.get('type')} by `{e.get('agent_name')}` — {e.get('title')}")
+    lines.append("\nAct on these, then call `memory_wait_for_event` again to re-arm.")
+    return "\n".join(lines)
+
+
+@mcp.prompt(name="listen", description="Park and wait for another agent to act — the cheap re-arm loop.")
+def prompt_listen(agent_name: str = "claude", cycles: str = "4") -> str:
+    return (
+        f"Enter listen mode as `{agent_name}`.\n\n"
+        f"1. Call `memory_wait_for_event(agent_name='{agent_name}', timeout_s=180)`.\n"
+        f"2. Act on every event it returns — claim tickets addressed to you, "
+        f"review submissions on tickets you created.\n"
+        f"3. Re-arm by calling it again.\n"
+        f"4. Stop after {cycles} consecutive idle returns, or when I say STOP, "
+        f"then summarise what happened while you were listening.\n\n"
+        f"Do not check in with me between cycles — just keep listening."
+    )
 
 
 @mcp.prompt(name="on-board", description="Join the project and get compact current context — always run this first.")
