@@ -92,6 +92,34 @@ async def main():
     res = await wait_as(WRK, timeout_s=5)
     check("idle on a quiet board", "Nothing in" in res, res[:90])
 
+    # 5. role gate: the worker may not sign off on its own work
+    print("\n5) role gate — completed != success")
+    await make_ticket(SUP, "needs independent review", assigned_to=WRK)
+    tid = [t["id"] for t in S._load_ticket_index()
+           if t["title"] == "needs independent review"][0]
+    await S.memory_claim_ticket(S.ClaimTicketInput(agent_name=WRK, ticket_id=tid))
+    res = await S.memory_submit_ticket(S.SubmitTicketInput(
+        agent_name=WRK, ticket_id=tid, summary="work done", stay_active=True))
+    check("worker can submit", "cannot submit" not in res, res[:110])
+    still = [a for a in S._load_agt().values()
+             if a.get("agent_name") == WRK and a.get("status") == "active"]
+    check("stay_active keeps the listener on board", bool(still),
+          "submit auto-handed-off the worker")
+
+    res = await S.memory_review_ticket(S.ReviewTicketInput(
+        agent_name=WRK, ticket_id=tid, verdict="approve",
+        review_notes="lgtm, reviewed by me"))
+    check("worker BLOCKED from reviewing own work", "cannot review" in res, res[:140])
+    check("denial names the owner to ask", SUP in res, res[:200])
+
+    res = await S.memory_review_ticket(S.ReviewTicketInput(
+        agent_name=SUP, ticket_id=tid, verdict="approve", review_notes="checked"))
+    check("owner can review", "cannot review" not in res, res[:140])
+    t = [x for x in S._load_ticket_index() if x["id"] == tid][0]
+    check("ticket closed", t["status"] == "closed", t["status"])
+    check("audit records the basis", t.get("review_permission") == "owner",
+          str(t.get("review_permission")))
+
     print(f"\n{len(ok)}/{len(ok) + len(fail)} passed")
     return 1 if fail else 0
 

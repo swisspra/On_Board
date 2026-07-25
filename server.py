@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from mcp.server.fastmcp import FastMCP
 
 import a2a_wait
+import ticket_roles
 
 # ── Config — PROJECT LOCAL ──────────────────────────────
 PROJECT_ROOT = Path(os.environ.get(
@@ -2419,6 +2420,7 @@ class SubmitTicketInput(BaseModel):
     summary: str = Field(..., description="What was done", min_length=1, max_length=5000)
     files_changed: Optional[List[str]] = Field(default_factory=list)
     notes: Optional[str] = Field(default=None, description="Any additional notes for reviewer", max_length=2000)
+    stay_active: bool = Field(default=False, description="Stay on board after submitting instead of auto-handing off. Set True if you are in a listen loop and want to wait for the verdict or retry after a rejection.")
 
 class ReviewTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -2427,6 +2429,8 @@ class ReviewTicketInput(BaseModel):
     verdict: str = Field(..., description="'approve' or 'reject'", pattern="^(approve|reject)$")
     review_notes: str = Field(..., description="Review feedback", min_length=1, max_length=5000)
     fix_instructions: Optional[str] = Field(default=None, description="If rejected: how to fix", max_length=5000)
+    allow_self_review: bool = Field(default=False, description="Set True only if you did this work yourself and no other agent is available to check it. Requires you to also own the ticket or hold a main/lead/reviewer role. The ticket is permanently marked SELF-REVIEWED.")
+    stay_active: bool = Field(default=False, description="Stay on board after approving instead of auto-handing off. Set True if you are in a listen loop.")
 
 class ListTicketsInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -2443,6 +2447,22 @@ def _ticket_creator_is_active(ticket: dict) -> bool:
         agent.get("agent_name") == creator and agent.get("status") == AgentStatus.ACTIVE
         for agent in _load_agt().values()
     )
+
+def _ticket_role_gate(agent_name: str, ticket: dict, target: str,
+                      allow_self_review: bool = False) -> tuple[bool, str]:
+    """Authorize a ticket transition. Returns (allowed, basis_or_reason).
+
+    Thin adapter: resolves the agent's coordinator status from live state and
+    hands the decision to ticket_roles, which is pure. Same (ok, basis) shape
+    as _ticket_control_permission so callers read alike.
+    """
+    actor = _active_agent_info(agent_name)
+    is_coord = _agent_role_value(actor) in COORDINATOR_ROLES
+    return ticket_roles.can_transition(
+        ticket.get("status"), target,
+        agent_name=agent_name, ticket=ticket,
+        is_coordinator=is_coord, allow_self_review=allow_self_review)
+
 
 def _ticket_control_permission(agent_name: str, ticket: dict, action: str) -> tuple[bool, str]:
     """Return whether an onboarded agent can cancel/terminate a ticket and why."""
@@ -2567,9 +2587,12 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
-            if t["status"] not in (TicketStatus.CLAIMED, TicketStatus.IN_PROGRESS, TicketStatus.CREATING_REPORT, TicketStatus.REJECTED, TicketStatus.IN_REVIEW):
-                return f"Ticket `{t['id']}` is {t['status']} — can only submit claimed/in_progress/creating_report tickets."
+            ok, basis = _ticket_role_gate(params.agent_name, t, TicketStatus.SUBMITTED.value)
+            if not ok:
+                return f"❌ `{params.agent_name}` cannot submit `{t['id']}`.\n{basis}"
             t["status"] = TicketStatus.SUBMITTED
+            t["submitted_by"] = params.agent_name
+            t["submit_permission"] = basis
             t["updated_at"] = _now()
             _save_ticket_index(idx)
 
@@ -2597,14 +2620,17 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
             submit_path = _tickets_dir() / "review" / f"{t['id']}-submit.md"
             submit_path.write_text("\n".join(submit_lines), encoding="utf-8")
 
-            # Auto-handoff: agent submitted work, should leave for reviewer
-            agents = _load_agt()
-            for a in agents.values():
-                if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
-                    a["status"] = AgentStatus.HANDED_OFF
-                    a["handed_off_at"] = _now()
-                    break
-            _save_agt(agents)
+            # Auto-handoff: agent submitted work, should leave for reviewer.
+            # A listening peer passes stay_active=True so it remains on board
+            # and can wait for the verdict / take the rejected -> retry path.
+            if not params.stay_active:
+                agents = _load_agt()
+                for a in agents.values():
+                    if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
+                        a["status"] = AgentStatus.HANDED_OFF
+                        a["handed_off_at"] = _now()
+                        break
+                _save_agt(agents)
 
             # Write handoff memory
             mem = _load_mem()
@@ -2649,9 +2675,14 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
-            if t["status"] not in (TicketStatus.SUBMITTED, TicketStatus.IN_REVIEW):
-                return f"Ticket `{t['id']}` is {t['status']} — can only review submitted tickets."
+            ok, basis = _ticket_role_gate(
+                params.agent_name, t, TicketStatus.REVIEWING.value,
+                allow_self_review=getattr(params, "allow_self_review", False))
+            if not ok:
+                return f"❌ `{params.agent_name}` cannot review `{t['id']}`.\n{basis}"
             t["status"] = TicketStatus.REVIEWING
+            t["reviewed_by"] = params.agent_name
+            t["review_permission"] = basis
             t["updated_at"] = _now()
             _save_ticket_index(idx)
 
