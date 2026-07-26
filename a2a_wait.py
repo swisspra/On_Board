@@ -85,6 +85,12 @@ def normalize_kinds(kinds: Optional[Iterable[str]]) -> frozenset:
 # Both sub-dicts are keyed by id so the diff is a plain key/field comparison
 # and never depends on list ordering.
 
+# Fields the ticket tools stamp with whoever performed each transition.
+# Carried onto every event so attribution is read, not guessed.
+ACTOR_FIELDS = ("created_by", "assigned_to", "claimed_by", "submitted_by",
+                "reviewed_by", "canceled_by", "terminated_by")
+
+
 def _ticket_event(kind: str, t: dict, **extra) -> dict:
     ev = {
         "kind": kind,
@@ -92,11 +98,10 @@ def _ticket_event(kind: str, t: dict, **extra) -> dict:
         "title": t.get("title"),
         "status": t.get("status"),
         "priority": t.get("priority"),
-        "created_by": t.get("created_by"),
-        "assigned_to": t.get("assigned_to"),
-        "claimed_by": t.get("claimed_by"),
         "at": t.get("updated_at") or t.get("created_at"),
     }
+    for f in ACTOR_FIELDS:
+        ev[f] = t.get(f)
     ev.update(extra)
     return ev
 
@@ -140,10 +145,25 @@ def diff_memories(prev: dict, cur: dict) -> list:
 
 
 # --- relevance + the loop guard ------------------------------------------
-# On Board's ticket record has created_by / assigned_to / claimed_by but no
-# last_actor, so attribution of a status change is inferred from which side of
-# the lifecycle the new status sits on. Adding an explicit `last_actor` field
-# in the ticket tools would make this exact; see NOTES.md.
+# Attribution is read from the field each ticket tool stamps with the acting
+# agent. The WORKER_DRIVEN / OWNER_DRIVEN sets below survive only as a
+# fallback for tickets written before those fields existed, since an upgraded
+# server still has to read whatever is already in .agent-mem/.
+
+# status the ticket landed in -> field naming who put it there
+_ACTOR_FIELD_BY_STATUS = {
+    "open": "created_by",
+    "claimed": "claimed_by",
+    "in_progress": "claimed_by",
+    "creating_report": "claimed_by",
+    "submitted": "submitted_by",
+    "reviewing": "reviewed_by",
+    "in_review": "reviewed_by",
+    "closed": "reviewed_by",
+    "rejected": "reviewed_by",
+    "canceled": "canceled_by",
+    "terminated": "terminated_by",
+}
 
 WORKER_DRIVEN = frozenset({"claimed", "in_progress", "creating_report", "submitted"})
 OWNER_DRIVEN = frozenset({"reviewing", "in_review", "closed", "canceled",
@@ -151,14 +171,22 @@ OWNER_DRIVEN = frozenset({"reviewing", "in_review", "closed", "canceled",
 
 
 def infer_actor(ev: dict) -> Optional[str]:
-    """Best-effort attribution of who caused an event."""
+    """Who caused this event. Exact when the stamp is present, else inferred."""
     kind = ev.get("kind")
     if kind == TICKET_CREATED:
         return ev.get("created_by")
     if kind == MEMORY_WRITTEN:
         return ev.get("agent_name")
+    if kind == TICKET_ASSIGNED:
+        # No reassign tool exists, so there is nothing to attribute this to.
+        # Returning None leaves it unfiltered, which is the safe direction:
+        # a spurious wake costs a poke, a suppressed one loses work.
+        return None
     if kind == TICKET_STATUS_CHANGED:
         status = (ev.get("status") or "").lower()
+        stamped = ev.get(_ACTOR_FIELD_BY_STATUS.get(status, ""))
+        if stamped:
+            return stamped
         if status in WORKER_DRIVEN:
             return ev.get("claimed_by") or ev.get("created_by")
         if status in OWNER_DRIVEN:

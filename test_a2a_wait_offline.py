@@ -39,13 +39,14 @@ class FakeBoard:
         self.script = {}          # read-count -> mutation callable
 
     def ticket(self, tid, *, status="open", created_by="alice",
-               assigned_to=None, claimed_by=None, title="t"):
+               assigned_to=None, claimed_by=None, title="t", **extra):
         self.tickets[tid] = {
             "id": tid, "title": title, "status": status,
             "created_by": created_by, "assigned_to": assigned_to,
             "claimed_by": claimed_by, "priority": "medium",
             "updated_at": f"ts-{self.reads}",
         }
+        self.tickets[tid].update(extra)
         return self
 
     def at_read(self, n, fn):
@@ -118,6 +119,48 @@ def test_only_mine_ignores_someone_elses_assignment():
     assert W.diff_events({}, cur, agent_name="bob") == []
     assert len(W.diff_events({}, cur, agent_name="bob", only_mine=False)) == 1
     assert len(W.diff_events({}, cur, agent_name="carol")) == 1
+
+
+# --- exact attribution beats the heuristic -------------------------------
+
+def _closed_by(actor):
+    """alice owns, bob executed, `actor` did the closing."""
+    prev = FakeBoard().ticket("T1", status="submitted",
+                              created_by="alice", claimed_by="bob").snapshot()
+    cur = FakeBoard().ticket("T1", status="closed", created_by="alice",
+                             claimed_by="bob", reviewed_by=actor).snapshot()
+    return prev, cur
+
+
+def test_coordinator_close_is_attributed_to_the_coordinator():
+    """The heuristic blamed the owner for every close. reviewed_by fixes it."""
+    prev, cur = _closed_by("carol")
+    assert W.diff_events(prev, cur, agent_name="carol", only_mine=False) == []
+    assert len(W.diff_events(prev, cur, agent_name="alice", only_mine=False)) == 1
+
+
+def test_owner_close_still_suppressed_for_the_owner():
+    prev, cur = _closed_by("alice")
+    assert W.diff_events(prev, cur, agent_name="alice", only_mine=False) == []
+
+
+def test_falls_back_to_the_heuristic_on_legacy_tickets():
+    """Tickets written before the stamps existed must still be attributable."""
+    prev = FakeBoard().ticket("T1", status="submitted",
+                              created_by="alice", claimed_by="bob").snapshot()
+    cur = FakeBoard().ticket("T1", status="closed",
+                             created_by="alice", claimed_by="bob").snapshot()
+    assert "reviewed_by" not in [k for k, v in cur["tickets"]["T1"].items() if v]
+    assert W.diff_events(prev, cur, agent_name="alice", only_mine=False) == []
+
+
+def test_submitted_by_attributes_the_submitter():
+    prev = FakeBoard().ticket("T1", status="in_progress",
+                              created_by="alice", claimed_by="bob").snapshot()
+    cur = FakeBoard().ticket("T1", status="submitted", created_by="alice",
+                             claimed_by="bob", submitted_by="bob").snapshot()
+    assert W.diff_events(prev, cur, agent_name="bob", only_mine=False) == []
+    assert len(W.diff_events(prev, cur, agent_name="alice", only_mine=False)) == 1
 
 
 # --- the wait loop -------------------------------------------------------
