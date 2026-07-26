@@ -2656,7 +2656,9 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
                 f"📤 Submitted `{t['id']}` for review!\n"
                 f"**{t['title']}** by `{params.agent_name}`\n"
                 f"Report: `tickets/review/{t['id']}-submit.md`\n\n"
-                f"🤝 You're off board. Reviewer will pick this up."
+                f"🤝 " + ("Still on board — re-arm `memory_wait_for_event` to catch the verdict."
+                          if params.stay_active
+                          else "You're off board. Reviewer will pick this up.")
             )
     return f"Ticket `{params.ticket_id}` not found."
 
@@ -2693,6 +2695,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 t["status"] = TicketStatus.CLOSED
                 t["reviewed_by"] = params.agent_name
                 t["reviewed_at"] = _now()
+                t["review_notes"] = params.review_notes
                 t["updated_at"] = _now()
                 _save_ticket_index(idx)
 
@@ -2737,6 +2740,8 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 t["status"] = TicketStatus.REJECTED
                 t["reviewed_by"] = params.agent_name
                 t["reviewed_at"] = _now()
+                t["review_notes"] = params.review_notes
+                t["fix_instructions"] = params.fix_instructions
                 t["updated_at"] = _now()
                 _save_ticket_index(idx)
 
@@ -2987,7 +2992,19 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
             who = e.get("assigned_to") or "anyone"
             lines.append(f"- 🆕 `{e['ticket_id']}` **{e['title']}** by `{e['created_by']}` → {who}")
         elif k == a2a_wait.TICKET_STATUS_CHANGED:
-            lines.append(f"- 🎫 `{e['ticket_id']}` {e.get('previous_status')} → **{e['status']}** — {e['title']}")
+            # memory_review_ticket writes REJECTED then immediately reopens to
+            # OPEN in the same call, so a poller never observes 'rejected'.
+            # rejection_count is the only durable marker; without it a rejection
+            # is indistinguishable from a plain unclaim.
+            rejected = e.get("rejection_count") and e.get("status") == "open"
+            arrow = "**REJECTED → open**" if rejected else f"**{e['status']}**"
+            lines.append(f"- 🎫 `{e['ticket_id']}` {e.get('previous_status')} → {arrow} — {e['title']}")
+            if rejected:
+                lines.append(f"    ❌ attempt #{e['rejection_count']} — reclaim to retry")
+            if e.get("review_notes"):
+                lines.append(f"    💬 `{e.get('reviewed_by')}`: {e['review_notes'][:400]}")
+            if e.get("fix_instructions"):
+                lines.append(f"    🔧 Fix: {e['fix_instructions'][:400]}")
         elif k == a2a_wait.TICKET_ASSIGNED:
             lines.append(f"- 📌 `{e['ticket_id']}` now assigned to **{e.get('assigned_to')}** — {e['title']}")
         else:
@@ -2997,16 +3014,22 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
 
 
 @mcp.prompt(name="listen", description="Park and wait for another agent to act — the cheap re-arm loop.")
-def prompt_listen(agent_name: str = "claude", cycles: str = "4") -> str:
+def prompt_listen(agent_name: str = "claude", timeout_s: str = "180") -> str:
     return (
         f"Enter listen mode as `{agent_name}`.\n\n"
-        f"1. Call `memory_wait_for_event(agent_name='{agent_name}', timeout_s=180)`.\n"
+        f"1. Call `memory_wait_for_event(agent_name='{agent_name}', timeout_s={timeout_s})`.\n"
         f"2. Act on every event it returns — claim tickets addressed to you, "
-        f"review submissions on tickets you created.\n"
-        f"3. Re-arm by calling it again.\n"
-        f"4. Stop after {cycles} consecutive idle returns, or when I say STOP, "
-        f"then summarise what happened while you were listening.\n\n"
-        f"Do not check in with me between cycles — just keep listening."
+        f"review submissions on tickets you created, and on a rejection read the "
+        f"fix instructions carried in the payload and retry without asking.\n"
+        f"3. Re-arm by calling it again. Keep going; there is no round budget.\n"
+        f"4. Stop only when I say STOP, or once the board has been idle long "
+        f"enough that waiting is pointless, then summarise what happened.\n\n"
+        f"Do not check in with me between cycles — just keep listening.\n\n"
+        f"Measured 2026-07-26 across two live Desktop instances: the ~240s client "
+        f"cancel is PER CALL, not cumulative per turn. Five consecutive re-arms "
+        f"totalling 340s of blocking ran clean, no cut and no wedged servers. So "
+        f"many short parks are safe and one long park is not — keep timeout_s at "
+        f"or under 180 and re-arm freely rather than raising it."
     )
 
 
