@@ -90,6 +90,12 @@ def normalize_kinds(kinds: Optional[Iterable[str]]) -> frozenset:
 ACTOR_FIELDS = ("created_by", "assigned_to", "claimed_by", "submitted_by",
                 "reviewed_by", "canceled_by", "terminated_by")
 
+# Verified live 2026-07-26: a listener woken by an approve received only
+# "submitted -> closed" and had to infer the outcome. On a REJECTION that is
+# materially bad — the worker wakes knowing it failed but not why, which
+# defeats the point of it retrying autonomously. Carry the verdict text.
+VERDICT_FIELDS = ("review_notes", "fix_instructions", "rejection_count")
+
 
 def _ticket_event(kind: str, t: dict, **extra) -> dict:
     ev = {
@@ -100,7 +106,7 @@ def _ticket_event(kind: str, t: dict, **extra) -> dict:
         "priority": t.get("priority"),
         "at": t.get("updated_at") or t.get("created_at"),
     }
-    for f in ACTOR_FIELDS:
+    for f in ACTOR_FIELDS + VERDICT_FIELDS:
         ev[f] = t.get(f)
     ev.update(extra)
     return ev

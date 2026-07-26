@@ -163,6 +163,20 @@ def test_submitted_by_attributes_the_submitter():
     assert len(W.diff_events(prev, cur, agent_name="alice", only_mine=False)) == 1
 
 
+def test_rejection_carries_the_reason_to_the_listener():
+    """Live 2026-07-26: the worker woke knowing it failed but not why."""
+    prev = FakeBoard().ticket("T1", status="submitted",
+                              created_by="alice", claimed_by="bob").snapshot()
+    cur = FakeBoard().ticket("T1", status="rejected", created_by="alice",
+                             claimed_by="bob", reviewed_by="alice",
+                             review_notes="word count is off by 12",
+                             fix_instructions="exclude the frontmatter").snapshot()
+    ev = W.diff_events(prev, cur, agent_name="bob", only_mine=False)[0]
+    assert ev["review_notes"] == "word count is off by 12"
+    assert ev["fix_instructions"] == "exclude the frontmatter"
+    assert ev["reviewed_by"] == "alice"
+
+
 # --- the wait loop -------------------------------------------------------
 
 def _run(board, *, baseline=None, agent="bob", timeout_s=180, beats=None):
