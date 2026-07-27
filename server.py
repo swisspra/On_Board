@@ -767,7 +767,7 @@ class MemoryWriteInput(BaseModel):
     agent_name: str = Field(..., description="Your agent name — same name you used in memory_onboard or memory_agent_join. Example: cursor-coder", min_length=1, max_length=100)
     memory_type: MemoryType = Field(..., description="One of: decision, progress, blocker, context, handoff, todo, file_change, discovery, warning, checkpoint")
     title: str = Field(..., description="Short one-line summary of what happened", min_length=1, max_length=200)
-    content: str = Field(..., description="Detailed description — be specific, include file names and reasoning", min_length=1, max_length=10000)
+    content: str = Field(..., description="Detailed description — be specific, include file names and reasoning. Board style: compressed English (agents read this); code/paths/IDs verbatim", min_length=1, max_length=10000)
     tags: Optional[List[str]] = Field(default_factory=list)
     related_files: Optional[List[str]] = Field(default_factory=list)
     related_tickets: Optional[List[str]] = Field(default_factory=list)
@@ -1932,7 +1932,9 @@ async def memory_token_usage() -> str:
 async def memory_prepare_compaction() -> str:
     """Returns cold entries grouped by agent session — ready for YOU to summarize.
 
-    Read the returned entries, write your own digest with memory_write(memory_type='context'),
+    Read the returned entries, write your own digest with memory_write(memory_type='context').
+    Digests are read ONLY by agents: write them in compressed English (token-thrift) —
+    facts, decisions, file paths; no prose. Code/paths/IDs stay verbatim.
     then run memory_compact() to archive the originals.
 
     Workflow:
@@ -2436,7 +2438,7 @@ class CreateTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., description="Who is creating this ticket", min_length=1, max_length=100)
     title: str = Field(..., description="Short ticket title", min_length=1, max_length=200)
-    description: str = Field(..., description="What needs to be done — be specific", min_length=1, max_length=5000)
+    description: str = Field(..., description="What needs to be done — be specific. Board style: compressed English (the claiming agent reads this); code/paths/IDs verbatim", min_length=1, max_length=5000)
     target_url: str = Field(..., description="URL the executor must navigate to", min_length=1, max_length=500)
     scope: str = Field(..., description="Execution scope: 'READ-ONLY', 'interactive-no-send', or 'interactive'", pattern="^(READ-ONLY|interactive-no-send|interactive)$")
     required_fields: List[str] = Field(..., description="Deliverables the executor MUST capture (e.g. ['console-log', 'screenshot-load'])", min_length=1)
@@ -2456,7 +2458,7 @@ class SubmitTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., min_length=1, max_length=100)
     ticket_id: str = Field(..., min_length=1)
-    summary: str = Field(..., description="What was done", min_length=1, max_length=5000)
+    summary: str = Field(..., description="What was done. Board style: compressed English (the reviewer reads this); code/paths/IDs verbatim", min_length=1, max_length=5000)
     files_changed: Optional[List[str]] = Field(default_factory=list)
     notes: Optional[str] = Field(default=None, description="Any additional notes for reviewer", max_length=2000)
     stay_active: bool = Field(default=False, description="Stay on board after submitting instead of auto-handing off. Set True if you are in a listen loop and want to wait for the verdict or retry after a rejection.")
@@ -2466,8 +2468,8 @@ class ReviewTicketInput(BaseModel):
     agent_name: str = Field(..., description="Reviewer agent name", min_length=1, max_length=100)
     ticket_id: str = Field(..., min_length=1)
     verdict: str = Field(..., description="'approve' or 'reject'", pattern="^(approve|reject)$")
-    review_notes: str = Field(..., description="Review feedback", min_length=1, max_length=5000)
-    fix_instructions: Optional[str] = Field(default=None, description="If rejected: how to fix", max_length=5000)
+    review_notes: str = Field(..., description="Review feedback. Board style: compressed English (the worker acts on this); code/paths/IDs verbatim", min_length=1, max_length=5000)
+    fix_instructions: Optional[str] = Field(default=None, description="If rejected: how to fix. Board style: compressed English (the retrying agent executes this); code/paths/IDs verbatim", max_length=5000)
     allow_self_review: bool = Field(default=False, description="Set True only if you did this work yourself and no other agent is available to check it. Requires you to also own the ticket or hold a main/lead/reviewer role. The ticket is permanently marked SELF-REVIEWED.")
 
 class ListTicketsInput(BaseModel):
@@ -3086,13 +3088,34 @@ def prompt_listen(agent_name: str = "claude", timeout_s: str = "180") -> str:
         f"3. Re-arm by calling it again. Keep going; there is no round budget.\n"
         f"4. Stop only when I say STOP, or once the board has been idle long "
         f"enough that waiting is pointless, then summarise what happened.\n\n"
-        f"Do not check in with me between cycles — just keep listening.\n\n"
+        f"Do not check in with me between cycles — just keep listening.\n"
+        f"When you write to the board (claims, submits, reviews), follow BOARD STYLE from onboarding: compressed English for machine-read fields, verbatim code/paths/IDs.\n\n"
         f"Measured 2026-07-26 across two live Desktop instances: the ~240s client "
         f"cancel is PER CALL, not cumulative per turn. Five consecutive re-arms "
         f"totalling 340s of blocking ran clean, no cut and no wedged servers. So "
         f"many short parks are safe and one long park is not — keep timeout_s at "
         f"or under 180 and re-arm freely rather than raising it."
     )
+
+
+# ── Board writing style (token-thrift for A2A) ──────────
+# Board entries are agent-to-agent payloads first, human-inspectable second.
+# token-thrift's audience rule maps onto On Board fields like this — and the
+# language rule dominates everything else: Thai measures 2.96x English tokens
+# for identical content, and one hop's output is the next hop's input.
+BOARD_STYLE = (
+    "BOARD STYLE (token-thrift): board entries are read by agents, only "
+    "skimmed by humans.\n"
+    "- Machine-read fields (memory content, ticket description, submit "
+    "summary/notes, review_notes, fix_instructions, digests): write ENGLISH, "
+    "compressed — drop articles, filler, hedging, restatements; facts and "
+    "actions only.\n"
+    "- Human-skim fields (title, pinned_summary): stay clear and readable; "
+    "any language.\n"
+    "- VERBATIM always: code, paths, IDs, numbers, error strings, and the "
+    "user's own words (never translate or paraphrase them across hops).\n"
+    "- If unsure a human will read it in full, do not compress."
+)
 
 
 @mcp.prompt(name="on-board", description="Join the project and get compact current context — always run this first.")
@@ -3104,7 +3127,8 @@ def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-de
         f"   - agent_platform: \"{agent_platform}\"\n"
         f"   - mode: \"normal\"\n\n"
         f"2. Report back: who is active, what tickets need attention, and what details you will load next if needed.\n\n"
-        f"Do not start any work until `memory_onboard` has completed."
+        f"Do not start any work until `memory_onboard` has completed.\n\n"
+        + BOARD_STYLE
     )
 
 
