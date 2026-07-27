@@ -2695,6 +2695,10 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 t["reviewed_by"] = params.agent_name
                 t["reviewed_at"] = _now()
                 t["review_notes"] = params.review_notes
+                # Clear the verdict of any EARLIER rejection: fields persist on
+                # the dict, so an approve-after-retry event would otherwise
+                # render the stale "Fix: ..." from the round that failed.
+                t.pop("fix_instructions", None)
                 t["updated_at"] = _now()
                 _save_ticket_index(idx)
 
@@ -2903,9 +2907,27 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
 # A2A — blocking wait. Loop + rationale live in a2a_wait.py
 # ═══════════════════════════════════════════════════════
 
-def _watch_p(): return MEMORY_DIR / "watch.json"
-def _load_watch(): return _load(_watch_p()).get("agents", {})
-def _save_watch(w): _save(_watch_p(), {"agents": w})
+# Cursor is one file PER AGENT. A shared watch.json would be read-modify-
+# written by two server PROCESSES (one per Desktop instance): lost updates
+# revert the peer's cursor (duplicate delivery), and JsonMemoryStore writes
+# via a fixed fp.with_suffix('.tmp') path, so two concurrent saves interleave
+# into one tmp file and corrupt it. Per-agent files have exactly one writer.
+def _safe_agent_fname(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name or "unknown")[:64]
+
+def _watch_p(agent_name: str):
+    return MEMORY_DIR / f"watch-{_safe_agent_fname(agent_name)}.json"
+
+def _load_watch(agent_name: str):
+    """This agent's cursor, falling back once to the legacy shared file."""
+    cur = _load(_watch_p(agent_name))
+    if cur.get("snapshot") is not None:
+        return cur["snapshot"]
+    legacy = _load(MEMORY_DIR / "watch.json").get("agents", {})
+    return legacy.get(agent_name)
+
+def _save_watch(agent_name: str, snapshot: dict):
+    _save(_watch_p(agent_name), {"snapshot": snapshot})
 
 
 def _board_snapshot() -> dict:
@@ -2925,7 +2947,8 @@ def _reduce_snapshot(snap: dict) -> dict:
     """
     return {
         "tickets": {k: {"status": v.get("status"),
-                        "assigned_to": v.get("assigned_to")}
+                        "assigned_to": v.get("assigned_to"),
+                        "rejection_count": v.get("rejection_count")}
                     for k, v in snap.get("tickets", {}).items()},
         "memories": {k: {} for k in snap.get("memories", {})},
     }
@@ -2960,7 +2983,7 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
     err = _require_joined(params.agent_name)
     if err: return err
 
-    baseline = _load_watch().get(params.agent_name)
+    baseline = _load_watch(params.agent_name)
 
     result = await a2a_wait.wait_for_events(
         _board_snapshot,
@@ -2973,9 +2996,8 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
         heartbeat_fn=lambda: _touch_heartbeat(params.agent_name),
     )
 
-    watch = _load_watch()   # re-read: a peer may have written while we parked
-    watch[params.agent_name] = _reduce_snapshot(result["snapshot"])
-    _save_watch(watch)
+    # Sole writer of this agent's cursor file — no cross-process RMW.
+    _save_watch(params.agent_name, _reduce_snapshot(result["snapshot"]))
 
     if result["status"] == "idle":
         return (f"😴 Nothing in {result['timeout_s']}s — board unchanged.\n"
@@ -2991,11 +3013,7 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
             who = e.get("assigned_to") or "anyone"
             lines.append(f"- 🆕 `{e['ticket_id']}` **{e['title']}** by `{e['created_by']}` → {who}")
         elif k == a2a_wait.TICKET_STATUS_CHANGED:
-            # memory_review_ticket writes REJECTED then immediately reopens to
-            # OPEN in the same call, so a poller never observes 'rejected'.
-            # rejection_count is the only durable marker; without it a rejection
-            # is indistinguishable from a plain unclaim.
-            rejected = e.get("rejection_count") and e.get("status") == "open"
+            rejected = a2a_wait.rejection_happened(e)
             arrow = "**REJECTED → open**" if rejected else f"**{e['status']}**"
             lines.append(f"- 🎫 `{e['ticket_id']}` {e.get('previous_status')} → {arrow} — {e['title']}")
             if rejected:

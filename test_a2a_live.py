@@ -84,11 +84,15 @@ async def main():
 
     # 4. cursor persisted, and a re-arm on a quiet board reports idle
     print("\n4) cursor + idle re-arm")
-    watch = S._load_watch()
-    check("watch.json has both agents", SUP in watch and WRK in watch, str(list(watch)))
-    check("cursor is reduced", all(
-        set(v) <= {"status", "assigned_to"}
-        for v in watch[WRK].get("tickets", {}).values()), "unreduced fields stored")
+    # HIGH-1: cursor is one file per agent — a single shared watch.json would
+    # be RMW'd by two server processes and its .tmp path collides on save.
+    ws, ww = S._watch_p(SUP), S._watch_p(WRK)
+    check("per-agent cursor files exist", ws.exists() and ww.exists(),
+          f"{ws.name}={ws.exists()} {ww.name}={ww.exists()}")
+    watch = S._load_watch(WRK)
+    check("cursor is reduced", watch and all(
+        set(v) <= {"status", "assigned_to", "rejection_count"}
+        for v in watch.get("tickets", {}).values()), "unreduced fields stored")
     res = await wait_as(WRK, timeout_s=5)
     check("idle on a quiet board", "Nothing in" in res, res[:90])
 
@@ -119,6 +123,34 @@ async def main():
     check("ticket closed", t["status"] == "closed", t["status"])
     check("audit records the basis", t.get("review_permission") == "owner",
           str(t.get("review_permission")))
+
+    # 6. reject -> retry -> approve, verdicts carried, nothing stale
+    print("\n6) reject/retry cycle — MED-1 + MED-2")
+    await make_ticket(SUP, "will be rejected once", assigned_to=WRK)
+    tid = [t["id"] for t in S._load_ticket_index()
+           if t["title"] == "will be rejected once"][0]
+    await S.memory_claim_ticket(S.ClaimTicketInput(agent_name=WRK, ticket_id=tid))
+    await S.memory_submit_ticket(S.SubmitTicketInput(
+        agent_name=WRK, ticket_id=tid, summary="attempt 1", stay_active=True))
+    await wait_as(WRK, timeout_s=1)          # advance wk cursor past own submit
+    await S.memory_review_ticket(S.ReviewTicketInput(
+        agent_name=SUP, ticket_id=tid, verdict="reject",
+        review_notes="wrong block", fix_instructions="use lines 1-5"))
+    res = await wait_as(WRK, timeout_s=5)
+    check("worker wakes on reject with reason", "REJECTED" in res and "use lines 1-5" in res, res[:200])
+    res_sup = await wait_as(SUP, timeout_s=2)
+    check("rejecting owner does NOT wake on own reject", "Nothing in" in res_sup, res_sup[:120])
+
+    await S.memory_claim_ticket(S.ClaimTicketInput(agent_name=WRK, ticket_id=tid))
+    await S.memory_submit_ticket(S.SubmitTicketInput(
+        agent_name=WRK, ticket_id=tid, summary="attempt 2", stay_active=True))
+    await wait_as(WRK, timeout_s=1)
+    await S.memory_review_ticket(S.ReviewTicketInput(
+        agent_name=SUP, ticket_id=tid, verdict="approve", review_notes="good now"))
+    res = await wait_as(WRK, timeout_s=5)
+    check("worker wakes on the approve", "closed" in res, res[:160])
+    check("approve is not flagged REJECTED", "REJECTED" not in res, res[:160])
+    check("no stale Fix from the failed round", "use lines 1-5" not in res, res[:200])
 
     print(f"\n{len(ok)}/{len(ok) + len(fail)} passed")
     return 1 if fail else 0

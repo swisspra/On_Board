@@ -124,6 +124,7 @@ def diff_tickets(prev: dict, cur: dict) -> list:
             events.append(_ticket_event(
                 TICKET_STATUS_CHANGED, t,
                 previous_status=old.get("status"),
+                previous_rejection_count=old.get("rejection_count"),
             ))
         if old.get("assigned_to") != t.get("assigned_to"):
             events.append(_ticket_event(
@@ -176,6 +177,19 @@ OWNER_DRIVEN = frozenset({"reviewing", "in_review", "closed", "canceled",
                           "terminated", "rejected"})
 
 
+def rejection_happened(ev: dict) -> bool:
+    """True when this status change IS a rejection landing back on 'open'.
+
+    memory_review_ticket writes REJECTED then immediately reopens to OPEN in
+    the same call, so a poller never observes 'rejected'. The only durable
+    trace is rejection_count incrementing — presence alone is not enough,
+    since the count persists forever and would false-flag any later reopen.
+    """
+    if ev.get("kind") != TICKET_STATUS_CHANGED:
+        return False
+    return (ev.get("rejection_count") or 0) > (ev.get("previous_rejection_count") or 0)
+
+
 def infer_actor(ev: dict) -> Optional[str]:
     """Who caused this event. Exact when the stamp is present, else inferred."""
     kind = ev.get("kind")
@@ -189,6 +203,12 @@ def infer_actor(ev: dict) -> Optional[str]:
         # a spurious wake costs a poke, a suppressed one loses work.
         return None
     if kind == TICKET_STATUS_CHANGED:
+        # A reject lands the ticket on 'open', whose map entry is created_by —
+        # but the true actor is the REVIEWER. Left uncorrected, a third-party
+        # coordinator's reject suppresses the owner (missed wake) and wakes
+        # the coordinator on her own action (a hole in the loop guard).
+        if rejection_happened(ev):
+            return ev.get("reviewed_by")
         status = (ev.get("status") or "").lower()
         stamped = ev.get(_ACTOR_FIELD_BY_STATUS.get(status, ""))
         if stamped:

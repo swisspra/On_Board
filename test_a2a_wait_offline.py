@@ -177,6 +177,46 @@ def test_rejection_carries_the_reason_to_the_listener():
     assert ev["reviewed_by"] == "alice"
 
 
+# --- reject-reopen attribution (MED-1) ------------------------------------
+
+def _reject_reopen(reviewer):
+    """alice owns, bob executed, `reviewer` rejected -> ticket back to open."""
+    prev = FakeBoard().ticket("T1", status="submitted", created_by="alice",
+                              claimed_by="bob").snapshot()
+    cur = FakeBoard().ticket("T1", status="open", created_by="alice",
+                             claimed_by="bob", reviewed_by=reviewer,
+                             rejection_count=1,
+                             review_notes="not good enough",
+                             fix_instructions="do X").snapshot()
+    return prev, cur
+
+
+def test_third_party_reject_wakes_the_owner():
+    """'open' maps to created_by, which mis-blamed the owner for a reject."""
+    prev, cur = _reject_reopen("carol")
+    assert len(W.diff_events(prev, cur, agent_name="alice", only_mine=False)) == 1
+
+
+def test_third_party_reject_does_not_wake_the_rejecting_coordinator():
+    """The loop-guard hole: carol must not wake on her own reject."""
+    prev, cur = _reject_reopen("carol")
+    assert W.diff_events(prev, cur, agent_name="carol", only_mine=False) == []
+
+
+def test_rejection_happened_needs_the_count_to_INCREASE():
+    """Presence alone false-flags later reopens; only a delta is a rejection."""
+    prev, cur = _reject_reopen("alice")
+    ev = W.diff_events(prev, cur, agent_name="bob", only_mine=False)[0]
+    assert W.rejection_happened(ev) is True
+    # same ticket unclaimed later: count present on BOTH sides, no delta
+    prev2 = FakeBoard().ticket("T1", status="claimed", created_by="alice",
+                               claimed_by="bob", rejection_count=1).snapshot()
+    cur2 = FakeBoard().ticket("T1", status="open", created_by="alice",
+                              claimed_by="bob", rejection_count=1).snapshot()
+    ev2 = W.diff_events(prev2, cur2, agent_name="carol", only_mine=False)[0]
+    assert W.rejection_happened(ev2) is False
+
+
 # --- the wait loop -------------------------------------------------------
 
 def _run(board, *, baseline=None, agent="bob", timeout_s=180, beats=None):
