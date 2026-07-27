@@ -1,5 +1,97 @@
 # Changelog
 
+## v4.0.0 — Agent-to-Agent (A2A): the listening half of On Board
+
+**Major.** Until now the board was pull-only: an agent learned that a peer
+created a ticket or left a handoff only when a human told it to look.
+v4 adds a blocking wait primitive so agents wake each other through the
+board — verified live between two Claude Desktop instances and one Codex
+(GPT) agent, including a full reject → fix → resubmit cycle closed with
+zero human relay and a reviewer-reproduced sha256.
+
+### ⚠️ BREAKING CHANGES
+
+1. **An executor can no longer adjudicate its own work** (`ticket_roles.py`).
+   Submitting requires having claimed the ticket; reviewing/closing requires
+   being the ticket's creator or holding a `main`/`lead`/`reviewer` role, and
+   is denied to whoever executed it. *Solo workflows* (create → claim →
+   review your own ticket) now require `allow_self_review=True` on
+   `memory_review_ticket`, which permanently stamps the ticket
+   `SELF-REVIEWED — no independent check`.
+2. **Assigned tickets are not claimable by other agents** (coordinators may
+   override). Previously assignment was advisory.
+3. **A bystander can no longer submit a ticket someone else claimed.**
+
+### Migration guide (existing `.agent-mem/` boards)
+
+- **No data migration needed.** Old tickets, memories, digests and
+  checkpoints load unchanged. Tickets written before the per-transition
+  stamps existed are attributed by a documented fallback heuristic
+  (covered by tests).
+- **Legacy wait cursors carry over**: a pre-v4 shared `watch.json` is read
+  once per agent, then superseded by per-agent `watch-<agent>.json`
+  (regression-tested: no replay storm on upgrade).
+- **Solo boards**: audit your habits — if you create, claim and review your
+  own tickets (grep for `created_by == claimed_by`), add
+  `allow_self_review=True` at review time or onboard a second identity as
+  reviewer.
+- **Windows**: `fcntl` is unavailable; the board lock degrades to pre-v4
+  last-write-wins semantics instead of failing to start. Single-instance
+  Windows use is unaffected; multi-instance Windows boards keep the old
+  concurrency risk.
+- New runtime files under `.agent-mem/`: `watch-<agent>.json`, `.board.lock`,
+  and per-process `*.tmp.<pid>` during saves — all inside the already
+  gitignored directory. Entry points, tool names and existing tool
+  signatures are unchanged; new parameters (`stay_active`,
+  `allow_self_review`) default to previous behaviour.
+
+### Added
+- Board style (token-thrift for A2A) — board entries are agent-to-agent
+  payloads first, human-inspectable second. Machine-read fields (memory
+  content, ticket descriptions, submit summaries, review verdicts, digests)
+  are now instructed — via the onboarding prompt, the `listen` prompt, field
+  descriptions, and the compaction workflow — to be written in compressed
+  English with code/paths/IDs verbatim; human-skim fields (titles, pinned
+  summaries) stay readable in any language. Rationale: Thai measures 2.96×
+  English tokens for identical content, and on a board one hop's output is
+  the next hop's input, so the language rule compounds across every wake.
+- `memory_wait_for_event` — park in one tool call until a peer creates a
+  ticket, changes a status, or assigns work. Checks before blocking (a re-arm
+  after a gap drains its backlog in 0s), one wake returns the whole queue,
+  and an agent never wakes on its own actions (attribution read from
+  per-transition stamps: `claimed_by`, `submitted_by`, `reviewed_by`, …).
+- `listen` MCP prompt — the cheap re-arm loop, with measured guidance:
+  Claude Desktop cancels at ~240s **per call, not per turn**, so keep
+  `timeout_s ≤ 180` and re-arm freely; stdio clients may pass `long_wait`.
+- Role × ownership gate (`ticket_roles.py`) — *completed ≠ success*: the
+  executor's terminal move is `submitted`; only the owner or a
+  main/lead/reviewer closes. Holds even when owner == executor;
+  `allow_self_review=True` is the explicit escape and stamps the ticket
+  SELF-REVIEWED. Assigned tickets are not claimable by others.
+- `stay_active` on `memory_submit_ticket` — listeners stay on board to catch
+  the verdict and take the rejected → retry path.
+- Review verdicts travel: `review_notes` / `fix_instructions` are stamped on
+  the ticket and carried on the wake event, so a rejected worker knows *why*
+  without a human relaying it. Rejections render as `REJECTED → open` via the
+  durable `rejection_count` delta (the transient `rejected` state is never
+  observable to a poller).
+- Cross-process board lock — `tickets/_index.json` mutations (and
+  `memory_agent_join`) hold an advisory flock, so simultaneous create/claim
+  from separate server processes no longer lose writes.
+- Per-process tmp names in `JsonMemoryStore.save` — concurrent saves from two
+  instances previously interleaved into one fixed `.tmp` path and corrupted it
+  (reproduced by the new multiprocess stress test).
+- Per-agent wait cursors (`watch-<agent>.json`) — single writer per file.
+- Test suites: 21 offline wait, 16 role rules, 22 live integration (full
+  reject → retry → approve cycle), multiprocess contention stress; origin's
+  39 workflow tests unchanged and passing (98 + stress total).
+
+### Notes
+- Local stdio servers cross Desktop instances; OAuth/AD connectors do not —
+  one session binds to one instance. The intended topology is asymmetric:
+  one instance holds enterprise connectors and fetches, the other does local
+  work, the board is the only channel between them.
+
 ## v3.7.1 — Safer Setup, Compact Onboarding, MCP SDK Security (2026-07-21)
 
 **Current GitHub Release collecting all major changes after v3.5.2, plus a security patch for the open Dependabot MCP Python SDK alerts.**
