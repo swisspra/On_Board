@@ -9,6 +9,15 @@ other through the board — verified live between two Claude Desktop instances
 (wake in 2–42s; 5 consecutive re-arms / 340s blocking in one turn, clean).
 
 ### Added
+- Board style (token-thrift for A2A) — board entries are agent-to-agent
+  payloads first, human-inspectable second. Machine-read fields (memory
+  content, ticket descriptions, submit summaries, review verdicts, digests)
+  are now instructed — via the onboarding prompt, the `listen` prompt, field
+  descriptions, and the compaction workflow — to be written in compressed
+  English with code/paths/IDs verbatim; human-skim fields (titles, pinned
+  summaries) stay readable in any language. Rationale: Thai measures 2.96×
+  English tokens for identical content, and on a board one hop's output is
+  the next hop's input, so the language rule compounds across every wake.
 - `memory_wait_for_event` — park in one tool call until a peer creates a
   ticket, changes a status, or assigns work. Checks before blocking (a re-arm
   after a gap drains its backlog in 0s), one wake returns the whole queue,
