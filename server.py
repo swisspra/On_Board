@@ -16,6 +16,7 @@ Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
 import json, os, time, hashlib, math, re
+import asyncio, fcntl, functools
 from datetime import datetime
 from typing import Optional, List
 from enum import Enum
@@ -184,7 +185,11 @@ class JsonMemoryStore:
     def save(self, fp: Path, data):
         self.ensure()
         fp.parent.mkdir(parents=True, exist_ok=True)
-        tmp = fp.with_suffix(".tmp")
+        # tmp name must be unique PER PROCESS: with A2A every Desktop/Codex
+        # instance runs its own server, and two concurrent saves to the same
+        # fixed .tmp path interleave into one file and corrupt it (reproduced
+        # by test_a2a_multiprocess.py on agents.json). rename() stays atomic.
+        tmp = fp.with_suffix(f".tmp.{os.getpid()}")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
         tmp.rename(fp)
@@ -193,6 +198,39 @@ class JsonMemoryStore:
         return self.memory_dir / name
 
 STORE = JsonMemoryStore(PROJECT_ROOT)
+
+
+# ── Board lock — serializes ticket-index mutations ──────
+# tickets/index.json is one file read-modify-written by EVERY ticket tool, and
+# each Desktop/Codex instance runs its own server process. Before A2A, two
+# agents rarely wrote at the same moment; memory_wait_for_event makes
+# simultaneous action the normal case (both wake off the same event), so a
+# create colliding with a claim silently drops one of them. An advisory flock
+# held for the whole mutating tool call makes each RMW atomic across
+# processes. Contention is a few ms (local disk, short tools), so blocking is
+# acceptable; the acquire runs in a thread to keep the event loop free.
+# Deliberately NOT applied to memory_wait_for_event (read-only, parks for
+# minutes). agents.json heartbeats stay unlocked (last-write-wins is fine),
+# but memory_agent_join IS locked: a lost join drops an agent from the roster.
+
+def _board_lock_path() -> Path:
+    STORE.ensure()
+    return STORE.memory_dir / ".board.lock"
+
+def _with_board_lock(fn):
+    @functools.wraps(fn)
+    async def _locked(*args, **kwargs):
+        fd = os.open(_board_lock_path(), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
+            return await fn(*args, **kwargs)
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+    return _locked
+
 
 def _ensure():
     STORE.ensure()
@@ -1067,6 +1105,7 @@ async def memory_init(params: ProjectInitInput) -> str:
     return f"✅ Initialized at `{MEMORY_DIR}`\n**Project**: {PROJECT_ROOT.name}\n**Description**: {params.description}\n**Tech**: {params.tech_stack or 'N/A'}\n\nNext: `memory_onboard`"
 
 @mcp.tool(name="memory_agent_join", annotations={"title":"Register as Active Agent","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_agent_join(params: AgentJoinInput) -> str:
     """Register as an active agent.
 
@@ -2484,6 +2523,7 @@ def _ticket_control_permission(agent_name: str, ticket: dict, action: str) -> tu
 
 
 @mcp.tool(name="memory_create_ticket", annotations={"title":"Create Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_create_ticket(params: CreateTicketInput) -> str:
     """Create a ticket requesting help from another agent.
 
@@ -2540,6 +2580,7 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
 
 
 @mcp.tool(name="memory_claim_ticket", annotations={"title":"Claim Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@_with_board_lock
 async def memory_claim_ticket(params: ClaimTicketInput) -> str:
     """Claim an open ticket (sets to claimed). Call again on a claimed ticket to advance to in_progress (e.g. when spawning a subagent)."""
     err = _require_joined(params.agent_name)
@@ -2574,6 +2615,7 @@ async def memory_claim_ticket(params: ClaimTicketInput) -> str:
 
 
 @mcp.tool(name="memory_submit_ticket", annotations={"title":"Submit Work for Review","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     """Submit completed work on a ticket for review.
 
@@ -2663,6 +2705,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
 
 
 @mcp.tool(name="memory_review_ticket", annotations={"title":"Review Submitted Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_review_ticket(params: ReviewTicketInput) -> str:
     """Review a submitted ticket. Approve → closed/ or Reject → rejected/.
 
@@ -2807,6 +2850,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
 
 
 @mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@_with_board_lock
 async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
     """Cancel a ticket. Creator, claimed agent, active main/reviewer, or any onboarded agent when creator is unavailable."""
     err = _require_joined(agent_name)
@@ -2833,6 +2877,7 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
 
 
 @mcp.tool(name="memory_terminate_ticket", annotations={"title":"Terminate Ticket","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":False})
+@_with_board_lock
 async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
     """Forcefully terminate a ticket at any stage. Creator or active main/reviewer only."""
     err = _require_joined(agent_name)

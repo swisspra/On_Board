@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased — nightly-rc: Agent-to-Agent (A2A)
+
+**The listening half of On Board.** Until now the board was pull-only: an agent
+learned that a peer created a ticket or left a handoff only when a human told
+it to look. `nightly-rc` adds a blocking wait primitive so agents wake each
+other through the board — verified live between two Claude Desktop instances
+(wake in 2–42s; 5 consecutive re-arms / 340s blocking in one turn, clean).
+
+### Added
+- `memory_wait_for_event` — park in one tool call until a peer creates a
+  ticket, changes a status, or assigns work. Checks before blocking (a re-arm
+  after a gap drains its backlog in 0s), one wake returns the whole queue,
+  and an agent never wakes on its own actions (attribution read from
+  per-transition stamps: `claimed_by`, `submitted_by`, `reviewed_by`, …).
+- `listen` MCP prompt — the cheap re-arm loop, with measured guidance:
+  Claude Desktop cancels at ~240s **per call, not per turn**, so keep
+  `timeout_s ≤ 180` and re-arm freely; stdio clients may pass `long_wait`.
+- Role × ownership gate (`ticket_roles.py`) — *completed ≠ success*: the
+  executor's terminal move is `submitted`; only the owner or a
+  main/lead/reviewer closes. Holds even when owner == executor;
+  `allow_self_review=True` is the explicit escape and stamps the ticket
+  SELF-REVIEWED. Assigned tickets are not claimable by others.
+- `stay_active` on `memory_submit_ticket` — listeners stay on board to catch
+  the verdict and take the rejected → retry path.
+- Review verdicts travel: `review_notes` / `fix_instructions` are stamped on
+  the ticket and carried on the wake event, so a rejected worker knows *why*
+  without a human relaying it. Rejections render as `REJECTED → open` via the
+  durable `rejection_count` delta (the transient `rejected` state is never
+  observable to a poller).
+- Cross-process board lock — `tickets/_index.json` mutations (and
+  `memory_agent_join`) hold an advisory flock, so simultaneous create/claim
+  from separate server processes no longer lose writes.
+- Per-process tmp names in `JsonMemoryStore.save` — concurrent saves from two
+  instances previously interleaved into one fixed `.tmp` path and corrupted it
+  (reproduced by the new multiprocess stress test).
+- Per-agent wait cursors (`watch-<agent>.json`) — single writer per file.
+- Test suites: 21 offline wait, 16 role rules, 22 live integration (full
+  reject → retry → approve cycle), multiprocess contention stress; origin's
+  39 workflow tests unchanged and passing (98 + stress total).
+
+### Notes
+- Local stdio servers cross Desktop instances; OAuth/AD connectors do not —
+  one session binds to one instance. The intended topology is asymmetric:
+  one instance holds enterprise connectors and fetches, the other does local
+  work, the board is the only channel between them.
+
 ## v3.7.1 — Safer Setup, Compact Onboarding, MCP SDK Security (2026-07-21)
 
 **Current GitHub Release collecting all major changes after v3.5.2, plus a security patch for the open Dependabot MCP Python SDK alerts.**
