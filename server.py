@@ -16,7 +16,11 @@ Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
 import json, os, time, hashlib, math, re
-import asyncio, fcntl, functools
+import asyncio, functools
+try:
+    import fcntl                      # POSIX only
+except ImportError:                   # Windows: no fcntl; degrade gracefully
+    fcntl = None
 from datetime import datetime
 from typing import Optional, List
 from enum import Enum
@@ -220,6 +224,12 @@ def _board_lock_path() -> Path:
 def _with_board_lock(fn):
     @functools.wraps(fn)
     async def _locked(*args, **kwargs):
+        if fcntl is None:
+            # Windows: no flock. Behaviour degrades to pre-lock semantics
+            # (last-write-wins on simultaneous ticket mutations) instead of
+            # crashing the whole server on import. Single-instance use is
+            # unaffected; multi-instance Windows boards keep the old risk.
+            return await fn(*args, **kwargs)
         fd = os.open(_board_lock_path(), os.O_RDWR | os.O_CREAT, 0o644)
         try:
             await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
