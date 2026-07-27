@@ -2430,7 +2430,6 @@ class ReviewTicketInput(BaseModel):
     review_notes: str = Field(..., description="Review feedback", min_length=1, max_length=5000)
     fix_instructions: Optional[str] = Field(default=None, description="If rejected: how to fix", max_length=5000)
     allow_self_review: bool = Field(default=False, description="Set True only if you did this work yourself and no other agent is available to check it. Requires you to also own the ticket or hold a main/lead/reviewer role. The ticket is permanently marked SELF-REVIEWED.")
-    stay_active: bool = Field(default=False, description="Stay on board after approving instead of auto-handing off. Set True if you are in a listen loop.")
 
 class ListTicketsInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
