@@ -126,10 +126,10 @@ def test_release_materials_match_current_version():
     first_header = next(line for line in changelog.splitlines() if line.startswith("## v"))
     release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
 
-    assert re.search(r'^version = "3\.7\.1"$', pyproject, re.MULTILINE)
-    assert first_header.startswith("## v3.7.1")
-    assert "Compact Onboarding" in first_header
-    for expected in ["linked projects", "Compact onboarding", "pinned_summary", "mcp", "1.28.1", "Dependabot"]:
+    assert re.search(r'^version = "4\.0\.0"$', pyproject, re.MULTILINE)
+    assert first_header.startswith("## v4.0.0")
+    assert "Agent-to-Agent" in first_header
+    for expected in ["memory_wait_for_event", "stay_active", "allow_self_review", "reject -> fix -> resubmit", "migration guide", "SELF-REVIEWED"]:
         assert expected in release_notes
 
 
@@ -177,6 +177,7 @@ def test_readme_keeps_roadmap_notes_out_of_front_page():
 
     assert "Honest gaps" not in readme
     assert "Q3 templates" not in readme
-    assert "A2A" not in readme
+    assert "Agent-to-agent: the listening half" in readme      # shipped in v4, belongs on the front page
+    assert "a2a-protocol.org" not in readme                    # the external protocol bridge is still roadmap
     assert "TASK_STATE_REJECTED" in a2a_note
     assert "Last checked: 2026-07-16" in a2a_note

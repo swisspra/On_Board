@@ -2,7 +2,11 @@
 
 Last checked: 2026-07-16
 
-This is a research note, not a shipped On Board feature.
+This is a research note about the external A2A protocol (a2a-protocol.org).
+Status update 2026-07-27: On Board v4.0.0 ships its own native agent-to-agent
+wake loop (`memory_wait_for_event`) following exactly the shape recommended
+below — On Board stays the coordination core. An external A2A-protocol
+bridge remains unshipped roadmap.
 
 ## Current protocol read
 
