@@ -721,3 +721,49 @@ def test_memory_links_shows_ticket_file_and_agent_linkage(tmp_path):
     assert "Ticket TK-abc implementation decision" in output
     assert "server.py" in output
     assert "codex-main" in output
+
+
+def test_reviewer_stays_active_after_approve_and_reject(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_mem([])
+    now = time.time()
+    server._save_agt({
+        "reviewer": {
+            "agent_name": "codex-reviewer",
+            "agent_platform": "codex",
+            "agent_role": "reviewer",
+            "status": "active",
+            "memories_written": 0,
+            "last_activity": now,
+        },
+    })
+    server._tickets_dir()
+
+    def _ticket(tid):
+        return {
+            "id": tid, "title": tid, "description": "d", "target_url": "local",
+            "scope": "READ-ONLY", "required_fields": ["result"], "priority": "medium",
+            "status": "submitted", "created_by": "planner", "assigned_to": None,
+            "claimed_by": "codex-worker", "created_at": "2026-05-08T12:01:00",
+            "updated_at": "2026-05-08T12:01:00", "timestamp": now,
+        }
+
+    server._save_ticket_index([_ticket("TK-ok"), _ticket("TK-no")])
+
+    approve = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer", ticket_id="TK-ok",
+        verdict="approve", review_notes="looks fine",
+    )))
+    assert "Approved" in approve
+    assert "still on board" in approve
+    # reviewer must NOT be auto-handed-off after approving
+    assert server._load_agt()["reviewer"]["status"] == "active"
+
+    reject = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer", ticket_id="TK-no",
+        verdict="reject", review_notes="nope", fix_instructions="redo",
+    )))
+    assert "Rejected" in reject
+    assert "still on board" in reject
+    assert server._load_agt()["reviewer"]["status"] == "active"

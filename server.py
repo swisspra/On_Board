@@ -2693,20 +2693,11 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 })
                 _save_mem(mem)
 
-                # Auto-handoff reviewer
-                agents = _load_agt()
-                for a in agents.values():
-                    if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
-                        a["status"] = AgentStatus.HANDED_OFF
-                        a["handed_off_at"] = _now()
-                        break
-                _save_agt(agents)
-
                 return (
                     f"✅ Approved `{t['id']}`: **{t['title']}**\n"
                     f"Moved to `tickets/closed/`\n"
                     f"Reviewed by `{params.agent_name}`\n\n"
-                    f"🤝 Ticket closed. You're off board."
+                    f"Ticket closed. You're still on board — review the next one or keep working."
                 )
 
             else:  # reject
@@ -2764,21 +2755,12 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 }))
                 _save_mem(mem)
 
-                # Auto-handoff reviewer — ticket reopened, next agent will see it
-                agents = _load_agt()
-                for a in agents.values():
-                    if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
-                        a["status"] = AgentStatus.HANDED_OFF
-                        a["handed_off_at"] = _now()
-                        break
-                _save_agt(agents)
-
                 return (
                     f"❌ Rejected `{t['id']}`: **{t['title']}**\n"
                     f"Rejection note: `tickets/rejected/{t['id']}-rejected.md`\n"
                     f"Ticket reopened for next agent to fix.\n"
                     f"Reviewed by `{params.agent_name}`\n\n"
-                    f"🤝 You're off board. Next agent will get back on board and see this ticket."
+                    f"You're still on board — the reopened ticket is ready for the next agent to claim."
                 )
     return f"Ticket `{params.ticket_id}` not found."
 
