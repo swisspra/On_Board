@@ -25,7 +25,7 @@ CONSTRAINTS THAT SHAPED IT
 PURITY
     No imports from server.py and no file I/O. The caller injects snapshot_fn
     and heartbeat_fn, which keeps this unit-testable offline. Same posture as
-    ticket_rules.py in the ORC bridge.
+    the pure rule modules in earlier ticket brokers.
 """
 
 from __future__ import annotations

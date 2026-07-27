@@ -377,6 +377,7 @@ def _on_board_protocol_xml() -> str:
         "  <write_policy>Write after meaningful actions only.</write_policy>",
         "  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>",
         "  <handoff_policy>Always handoff before leaving.</handoff_policy>",
+        "  <a2a_policy>To wait for peers, park in memory_wait_for_event and re-arm after every return. Submit with stay_active=true when you need the verdict. Never review your own executed work without allow_self_review.</a2a_policy>",
         "</on_board_protocol>",
     ])
 

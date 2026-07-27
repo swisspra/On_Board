@@ -1,6 +1,6 @@
 """Ticket role + ownership rules for On Board (pure, testable).
 
-Ported from ticket_rules.py in the ORC bridge and widened to On Board's
+Ported from a pure ticket-rules module in an earlier broker and widened to On Board's
 lifecycle, which has more states because work is claimed from a queue rather
 than handed to a single known executor.
 
