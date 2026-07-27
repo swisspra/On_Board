@@ -1,12 +1,49 @@
 # Changelog
 
-## Unreleased — nightly-rc: Agent-to-Agent (A2A)
+## v4.0.0 — Agent-to-Agent (A2A): the listening half of On Board
 
-**The listening half of On Board.** Until now the board was pull-only: an agent
-learned that a peer created a ticket or left a handoff only when a human told
-it to look. `nightly-rc` adds a blocking wait primitive so agents wake each
-other through the board — verified live between two Claude Desktop instances
-(wake in 2–42s; 5 consecutive re-arms / 340s blocking in one turn, clean).
+**Major.** Until now the board was pull-only: an agent learned that a peer
+created a ticket or left a handoff only when a human told it to look.
+v4 adds a blocking wait primitive so agents wake each other through the
+board — verified live between two Claude Desktop instances and one Codex
+(GPT) agent, including a full reject → fix → resubmit cycle closed with
+zero human relay and a reviewer-reproduced sha256.
+
+### ⚠️ BREAKING CHANGES
+
+1. **An executor can no longer adjudicate its own work** (`ticket_roles.py`).
+   Submitting requires having claimed the ticket; reviewing/closing requires
+   being the ticket's creator or holding a `main`/`lead`/`reviewer` role, and
+   is denied to whoever executed it. *Solo workflows* (create → claim →
+   review your own ticket) now require `allow_self_review=True` on
+   `memory_review_ticket`, which permanently stamps the ticket
+   `SELF-REVIEWED — no independent check`.
+2. **Assigned tickets are not claimable by other agents** (coordinators may
+   override). Previously assignment was advisory.
+3. **A bystander can no longer submit a ticket someone else claimed.**
+
+### Migration guide (existing `.agent-mem/` boards)
+
+- **No data migration needed.** Old tickets, memories, digests and
+  checkpoints load unchanged. Tickets written before the per-transition
+  stamps existed are attributed by a documented fallback heuristic
+  (covered by tests).
+- **Legacy wait cursors carry over**: a pre-v4 shared `watch.json` is read
+  once per agent, then superseded by per-agent `watch-<agent>.json`
+  (regression-tested: no replay storm on upgrade).
+- **Solo boards**: audit your habits — if you create, claim and review your
+  own tickets (grep for `created_by == claimed_by`), add
+  `allow_self_review=True` at review time or onboard a second identity as
+  reviewer.
+- **Windows**: `fcntl` is unavailable; the board lock degrades to pre-v4
+  last-write-wins semantics instead of failing to start. Single-instance
+  Windows use is unaffected; multi-instance Windows boards keep the old
+  concurrency risk.
+- New runtime files under `.agent-mem/`: `watch-<agent>.json`, `.board.lock`,
+  and per-process `*.tmp.<pid>` during saves — all inside the already
+  gitignored directory. Entry points, tool names and existing tool
+  signatures are unchanged; new parameters (`stay_active`,
+  `allow_self_review`) default to previous behaviour.
 
 ### Added
 - Board style (token-thrift for A2A) — board entries are agent-to-agent

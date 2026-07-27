@@ -152,6 +152,19 @@ async def main():
     check("approve is not flagged REJECTED", "REJECTED" not in res, res[:160])
     check("no stale Fix from the failed round", "use lines 1-5" not in res, res[:200])
 
+    # 7. migration: legacy shared watch.json cursor must carry over
+    print("\n7) legacy cursor migration")
+    legacy_agent = "old-timer"
+    await join(legacy_agent, "worker")
+    snap_now = S._reduce_snapshot(S._board_snapshot())
+    # simulate a pre-upgrade board: cursor lives ONLY in the old shared file
+    S._save(S.MEMORY_DIR / "watch.json", {"agents": {legacy_agent: snap_now}})
+    assert not S._watch_p(legacy_agent).exists()
+    res = await wait_as(legacy_agent, timeout_s=3)
+    check("legacy cursor honoured (no replay storm of existing board)",
+          "Nothing in" in res, res[:160])
+    check("cursor migrated to per-agent file", S._watch_p(legacy_agent).exists())
+
     print(f"\n{len(ok)}/{len(ok) + len(fail)} passed")
     return 1 if fail else 0
 
