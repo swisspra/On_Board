@@ -152,12 +152,19 @@ def check_transition(current: Optional[str], target: str, *,
     if target in ADJUDICATION_TARGETS and is_executor:
         if not allow_self_review:
             owner = ticket.get("created_by") or "the owner"
+            # When the executor IS the owner — a solo create -> claim -> do cycle
+            # — naming them here tells them to go ask themselves, which reads as
+            # a broken message even though the lookup is correct. Point at the
+            # role instead, and keep allow_self_review as the real way out.
+            who = ("another main/lead/reviewer agent"
+                   if owner == agent_name
+                   else f"`{owner}` or a main/lead/reviewer agent")
             raise TransitionError(
                 f"`{agent_name}` executed this ticket and may not also set "
                 f"'{target}'. Reaching 'submitted' is the executor's last move "
-                f"— completed != success. Ask `{owner}` or a main/lead/reviewer "
-                f"agent to review, or pass allow_self_review=True to record an "
-                f"unreviewed close in the audit.")
+                f"— completed != success. Ask {who} to review, or pass "
+                f"allow_self_review=True to record an unreviewed close in the "
+                f"audit.")
         if not (is_owner or is_coordinator):
             raise TransitionError(
                 f"`{agent_name}` neither owns nor coordinates this ticket, so "

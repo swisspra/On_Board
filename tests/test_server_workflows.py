@@ -903,3 +903,121 @@ def test_rejection_warning_demotes_on_approve_but_manual_warning_survives(tmp_pa
 
     server._demote_rejection_warnings(memories, "TK-resolve", "closed", "codex-reviewer")
     assert next(m for m in memories if "Rejected TK-resolve" in m["title"])["title"].count("[RESOLVED:closed]") == 1
+# --- issue #13 polish -----------------------------------------------------
+
+def test_ticket_md_status_is_the_wire_value_not_an_enum_repr(tmp_path):
+    """f-string on a str-mixin Enum yields 'TicketStatus.X' on Python 3.11+."""
+    server = load_server(tmp_path)
+    path = tmp_path / "t.md"
+    server._write_ticket_md(path, {"id": "TK-1", "title": "t",
+                                   "status": server.TicketStatus.SUBMITTED})
+    body = path.read_text()
+    assert "**Status**: submitted" in body
+    assert "TicketStatus" not in body
+
+
+def test_closed_ticket_md_is_rewritten_with_its_final_status(tmp_path):
+    """The .md was written at submit and never again, so closed read 'submitted'.
+
+    _index.json is the source of truth, but a human diagnosing a problem reads
+    the .md — a stale one sends them down the wrong path, which is exactly how
+    a reviewer once concluded a rejection had been silently reverted.
+    """
+    server = load_server(tmp_path)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "lead", "status": "active",
+                             "last_activity": time.time()},
+                      "a2": {"agent_name": "worker", "status": "active",
+                             "last_activity": time.time()}})
+    server._save_ticket_index([{
+        "id": "TK-done", "title": "probe", "description": "d",
+        "target_url": "local", "scope": "READ-ONLY", "required_fields": ["r"],
+        "priority": "medium", "status": "submitted", "created_by": "lead",
+        "assigned_to": "worker", "claimed_by": "worker",
+        "created_at": "2026-05-08T12:00:00", "updated_at": "2026-05-08T12:00:00",
+        "timestamp": time.time(),
+    }])
+    server._write_ticket_md(server._tickets_dir() / "TK-done.md",
+                            server._load_ticket_index()[0])
+
+    asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="lead", ticket_id="TK-done", verdict="approve",
+        review_notes="ok")))
+
+    body = (server._tickets_dir() / "closed" / "TK-done.md").read_text()
+    assert "**Status**: closed" in body
+    assert "submitted" not in body.split("**Priority**")[0]
+
+
+def test_submit_keeps_an_agent_that_owes_a_review_on_board(tmp_path):
+    """Auto-handoff must not strand a submission the leaver was due to review.
+
+    Observed live: codex submitted its own ticket, auto-handed off, and its
+    peer's submission then sat unreviewed with nobody on board to adjudicate.
+    """
+    server = load_server(tmp_path)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "lead", "status": "active",
+                             "last_activity": time.time()}})
+    now = time.time()
+    common = {"description": "d", "target_url": "local", "scope": "READ-ONLY",
+              "required_fields": ["r"], "priority": "medium",
+              "created_at": "2026-05-08T12:00:00",
+              "updated_at": "2026-05-08T12:00:00", "timestamp": now}
+    server._save_ticket_index([
+        # lead's own work, about to be submitted
+        dict(common, id="TK-mine", title="mine", status="claimed",
+             created_by="lead", assigned_to="lead", claimed_by="lead"),
+        # a peer's submission that lead owns and therefore owes a verdict on
+        dict(common, id="TK-peer", title="peer", status="submitted",
+             created_by="lead", assigned_to="peer", claimed_by="peer"),
+    ])
+
+    out = asyncio.run(server.memory_submit_ticket(server.SubmitTicketInput(
+        agent_name="lead", ticket_id="TK-mine", summary="done")))
+
+    assert "owe a review" in out and "TK-peer" in out
+    statuses = [a["status"] for a in server._load_agt().values()
+                if a["agent_name"] == "lead"]
+    assert statuses == ["active"], statuses
+
+
+def test_submit_still_hands_off_when_nothing_is_owed(tmp_path):
+    """The guard must be narrow: no owed review, original behaviour stands."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "solo", "status": "active",
+                             "last_activity": time.time()}})
+    server._save_ticket_index([{
+        "id": "TK-only", "title": "only", "description": "d",
+        "target_url": "local", "scope": "READ-ONLY", "required_fields": ["r"],
+        "priority": "medium", "status": "claimed", "created_by": "boss",
+        "assigned_to": "solo", "claimed_by": "solo",
+        "created_at": "2026-05-08T12:00:00", "updated_at": "2026-05-08T12:00:00",
+        "timestamp": time.time(),
+    }])
+
+    out = asyncio.run(server.memory_submit_ticket(server.SubmitTicketInput(
+        agent_name="solo", ticket_id="TK-only", summary="done")))
+
+    assert "off board" in out
+    assert [a["status"] for a in server._load_agt().values()] == ["handed_off"]
+
+
+def test_server_icons_declared_only_when_the_asset_exists(tmp_path):
+    """No placeholder branding is invented when the icon file is absent."""
+    server = load_server(tmp_path)
+    missing = tmp_path / "nope.png"
+    real = tmp_path / "icon.png"
+    real.write_bytes(b"\x89PNG\r\n\x1a\nfake-but-nonempty")
+
+    original = server._ICON_PATH
+    try:
+        server._ICON_PATH = missing
+        assert server._server_icons() is None
+        server._ICON_PATH = real
+        icons = server._server_icons()
+        assert icons and icons[0].src.startswith("data:image/png;base64,")
+        assert icons[0].mimeType == "image/png"
+    finally:
+        server._ICON_PATH = original
