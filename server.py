@@ -47,7 +47,7 @@ MEMORY_DIR = PROJECT_ROOT / ".agent-mem"
 # COLD: raw archive on disk, never loaded unless searched
 HOT_WINDOW_HOURS = int(os.environ.get("AGENT_MEM_HOT_HOURS", "24"))
 MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
-THRIFT_COMPACT_ENABLED = os.environ.get("AGENT_MEM_THRIFT_COMPACT", "1").lower() not in {
+THRIFT_COMPACT_ENABLED = os.environ.get("AGENT_MEM_THRIFT_COMPACT", "0").lower() not in {
     "0", "false", "off", "no"
 }
 VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()

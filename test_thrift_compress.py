@@ -31,3 +31,14 @@ def test_digest_titles_are_verbatim():
     assert "**Please utilize the database**" in result
     assert result.count("utilize") == 1
     assert "DB" in result
+
+
+def test_plain_entry_title_is_verbatim():
+    source = "- Refactored the database configuration in the deployment environment (`codex-sub`)"
+    result = compress_digest(source)
+    assert result == source + "\n"
+
+
+def test_single_hash_heading_is_verbatim():
+    source = "# The database configuration for repository auth"
+    assert compress_digest(source) == source + "\n"
