@@ -277,6 +277,7 @@ const LS = { get: k => { try { return localStorage.getItem('onboard.' + k); } ca
 const state = {
   theme: LS.get('theme') || 'dark',
   chartMode: LS.get('chart') || 'rich',
+  showIdleSubs: LS.get('idlesubs') === '1',
   density: LS.get('density') || 'comfortable',
   tab: 'overview', win: 24, tlGroup: 'day', ticketView: 'list',
   query: '', palOpen: false, palQuery: '', palIdx: 0,
@@ -525,11 +526,122 @@ function derive() {
   // quota tab
   const q = quota(state.win, activeNames);
 
+
+  /* ---------- A2A graph: agents are nodes, real handoffs are edges ----------
+     Nothing new is stored for this. Every ticket already records who created,
+     assigned, claimed and reviewed it, which IS a directed edge list. A
+     self-loop means one agent did the whole ticket alone -- the exact pattern
+     the v4 role gate now asks you to justify with allow_self_review. */
+  /* Sub-agents are LABOUR, not members. A worker runtime may split itself to
+     do a ticket, but the board only ever knows the principal: it claims, it
+     submits, it carries the blame. Subs are therefore folded into their parent
+     for every edge and rendered as satellites, never as peers. This is what
+     closes the identity-minting hole by construction rather than by rule --
+     something with no board identity cannot claim or review anything.
+     Parentage is DECLARED (parent_agent) with a conservative name fallback for
+     boards written before the field existed. */
+  const principals = new Set(), subOf = {};
+  agentList.forEach(a => {
+    const n = a.agent_name; if (!n) return;
+    const declared = a.parent_agent || a.parent;
+    const isSub = !!declared || ['subagent','sub','child'].includes((a.agent_role||'').toLowerCase());
+    if (isSub) { const m = declared || (n.match(/^(.*?)[-._](?:sub|worker|a?\d+)\b/i)||[])[1]; if (m && m !== n) { subOf[n] = m; return; } }
+    principals.add(n);
+  });
+  Object.entries(subOf).forEach(([s,p]) => { if (!principals.has(p)) principals.add(p); });
+  const canon = n => subOf[n] || n;
+  const nameSet = new Set(principals);
+  const edgeMap = new Map();
+  const nowMs = Date.now();
+  const addEdge = (rawFrom, rawTo, kind, when) => {
+    const from = canon(rawFrom), to = canon(rawTo);
+    if (!from || !to) return;
+    nameSet.add(from); nameSet.add(to);
+    const key = from + '\u0000' + to + '\u0000' + kind;
+    /* Timestamps are NOT uniform on a ticket: created_at/reviewed_at are ISO
+       strings while claimed_at is a float epoch (seconds). new Date(1785233007)
+       silently reads as 1970, which would have made every claim edge look
+       ancient. Normalise both shapes. */
+    let at = 0;
+    if (typeof when === 'number') at = when < 1e12 ? when * 1000 : when;
+    else if (when) { const p = Date.parse(when); if (!isNaN(p)) at = p; }
+    const e = edgeMap.get(key) || { from, to, kind, n: 0, last: 0 };
+    e.n++; if (at > e.last) e.last = at;
+    edgeMap.set(key, e);
+  };
+  d.tickets.forEach(t => {
+    const owner = t.created_by, worker = t.claimed_by, rev = t.reviewed_by;
+    if (t.assigned_to) addEdge(owner, t.assigned_to, 'assign', t.created_at);
+    if (worker) addEdge(t.assigned_to || owner, worker, 'claim', t.claimed_at);
+    if (t.submitted_by || t.status === 'submitted' || rev) addEdge(worker || owner, rev || owner, 'submit', t.submitted_at || t.updated_at);
+    if ((t.rejection_count || 0) > 0 && rev) addEdge(rev, worker || owner, 'reject', t.reviewed_at || t.updated_at);
+    if (t.canceled_by) addEdge(t.canceled_by, owner, 'cancel', t.updated_at);
+  });
+  const a2aNames = [...nameSet].filter(Boolean).sort();
+  const EK = { assign:{c:'var(--muted)',label:'assigned'}, claim:{c:'#3b82f6',label:'claimed'},
+               submit:{c:'#10b981',label:'submitted'}, reject:{c:'#ef4444',label:'rejected'},
+               cancel:{c:'#f59e0b',label:'canceled'} };
+  const colorOf = {}; agentsFull.forEach(a => { colorOf[a.rawName || a.name] = a.color; });
+  const CX = 300, CY = 215, RAD = a2aNames.length > 5 ? 132 : 112;
+  const a2aNodes = a2aNames.map((name, i) => {
+    const ang = -Math.PI / 2 + i * 2 * Math.PI / Math.max(a2aNames.length, 1);
+    const ag = agentList.find(a => a.agent_name === name);
+    const x = +(CX + RAD * Math.cos(ang)).toFixed(1), y = +(CY + RAD * Math.sin(ang)).toFixed(1);
+    /* Sub-workers sit at FIXED positions fanned outward from their principal.
+       Motion in this view is reserved for work in flight; a moving agent reads
+       as activity that isn't happening. */
+    const kids = Object.entries(subOf).filter(([, p]) => p === name).map(([s]) => s);
+    const ux = Math.cos(ang), uy = Math.sin(ang), px = -uy, py = ux;   /* out, side */
+    /* Long-running boards accumulate dead sub-workers. Default to showing only
+       the ones still working; the rest stay counted, just not drawn, so the
+       badge never lies about how many exist. */
+    const withState = kids.map(s => ({ name: s,
+      live: (agentList.find(a => a.agent_name === s) || {}).status === 'active' }));
+    const shown = state.showIdleSubs ? withState : withState.filter(s => s.live);
+    const subs = shown.map((s, k) => {
+      const off = (k - (shown.length - 1) / 2) * 34;
+      return { ...s, x: +(x + ux * 46 + px * off).toFixed(1),
+                     y: +(y + uy * 46 + py * off).toFixed(1) };
+    });
+    return { name, x, y, live: ag ? ag.status === 'active' : false,
+             role: (ag && ag.agent_role) || '', color: colorOf[name] || 'var(--muted)',
+             subs, total: withState.length, hidden: withState.length - shown.length,
+             busy: withState.filter(s => s.live).length };
+  });
+  const posOf = {}; a2aNodes.forEach(n => posOf[n.name] = n);
+  const freshest = Math.max(1, ...[...edgeMap.values()].map(e => e.last));
+  const a2aEdges = [...edgeMap.values()].map(e => {
+    const A = posOf[e.from], B = posOf[e.to];
+    if (!A || !B) return null;
+    const ageH = e.last ? (nowMs - e.last) / 3.6e6 : 999;
+    const hot = e.last >= freshest - 6e5;            /* within 10 min of newest */
+    let path, loop = A === B;
+    if (loop) {
+      const ox = A.x > CX ? 34 : -34, oy = A.y > CY ? 30 : -30;
+      path = 'M' + A.x + ',' + A.y + ' C' + (A.x + ox) + ',' + (A.y + oy * 1.6) + ' ' + (A.x + ox * 1.9) + ',' + (A.y + oy * .4) + ' ' + A.x + ',' + A.y;
+    } else {
+      const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2, dx = mx - CX, dy = my - CY;
+      const L = Math.hypot(dx, dy) || 1, bow = 26 + (e.kind === 'reject' ? 16 : 0);
+      path = 'M' + A.x + ',' + A.y + ' Q' + (mx + dx / L * bow).toFixed(1) + ',' + (my + dy / L * bow).toFixed(1) + ' ' + B.x + ',' + B.y;
+    }
+    return { ...e, path, loop, color: EK[e.kind].c, kindLabel: EK[e.kind].label,
+             w: Math.min(1 + e.n * .7, 4), dur: (hot ? 1.6 : ageH < 24 ? 2.8 : 4.6).toFixed(1),
+             op: hot ? .95 : ageH < 24 ? .6 : .3, hot };
+  }).filter(Boolean);
+  const soloLoops = a2aEdges.filter(e => e.loop).length;
+  const a2aStats = { agents: a2aNodes.length, edges: a2aEdges.length,
+    transfers: a2aEdges.reduce((s, e) => s + e.n, 0),
+    rejects: a2aEdges.filter(e => e.kind === 'reject').reduce((s, e) => s + e.n, 0),
+    solo: soloLoops, live: a2aNodes.filter(n => n.live).length,
+    subs: a2aNodes.reduce((s, n) => s + n.total, 0),
+    subsHidden: a2aNodes.reduce((s, n) => s + n.hidden, 0),
+    legend: Object.entries(EK).map(([k, v]) => ({ k, ...v, n: a2aEdges.filter(e => e.kind === k).reduce((s, e) => s + e.n, 0) })).filter(x => x.n) };
+
   return { isRich, C, memSorted, openTickets, activeAgents, totalTok, typeSegs, spark:{line,area,total:buckets.reduce((a,b)=>a+b,0)},
     recent, roster, agentsFull, agentRows, platforms, platCount:platItems.length, platTop, totalAgents:agentList.length, tickets, ticketRows, flowStages, flowBranch, flowBranchTotal, linkTickets, fileLinks, tags, health,
     hscore, hcolor, hlabel, kpis, timelineGroups, tokenKpis, tokenSegs, tokenTotal:fmt(hot+dig+arc),
-    changes, changeKpis, q,
-    counts:{ memories:d.memories.length, agents:agentList.length, openTickets } };
+    changes, changeKpis, q, a2aNodes, a2aEdges, a2aStats,
+    counts:{ memories:d.memories.length, agents:agentList.length, openTickets, a2aEdges:a2aEdges.length } };
 }
 
 function quota(hours, activeNames) {
@@ -583,6 +695,7 @@ const NAV = [
   ['timeline','Timeline','memories','<line x1="4" y1="2" x2="4" y2="14"/><circle cx="4" cy="5" r="1.7" fill="currentColor" stroke="none"/><circle cx="4" cy="11" r="1.7" fill="currentColor" stroke="none"/><line x1="8" y1="5" x2="14" y2="5"/><line x1="8" y1="11" x2="12.5" y2="11"/>'],
   ['changes','Changes',null,'<path d="M2.5 4.5h7"/><path d="M6.5 2l3 2.5-3 2.5"/><path d="M13.5 11.5h-7"/><path d="M9.5 9l-3 2.5 3 2.5"/>'],
   ['agents','Agents','agents','<circle cx="6" cy="6" r="2.4"/><circle cx="11.4" cy="7" r="1.9"/><path d="M2 13.4c0-2.1 1.8-3.3 4-3.3s4 1.2 4 3.3"/>'],
+  ['a2a','A2A flow','a2aEdges','<circle cx="3.5" cy="4" r="1.9"/><circle cx="12.5" cy="4" r="1.9"/><circle cx="8" cy="12.5" r="1.9"/><path d="M5.4 4.6c2 1.6 3.2 3.4 3.2 6" stroke-dasharray="1.5 1.4"/><path d="M10.9 5.2c-1.2 1.4-2 3-2.3 5" stroke-dasharray="1.5 1.4"/><path d="M5.4 3.4h5.2"/>'],
   ['tickets','Tickets','openTickets','<rect x="2" y="4" width="12" height="8" rx="1.6"/><line x1="2" y1="8" x2="14" y2="8" stroke-dasharray="1.4 1.4"/>'],
   ['links','Links',null,'<circle cx="4" cy="4.5" r="2"/><circle cx="12" cy="6" r="2"/><circle cx="7" cy="12" r="2"/><line x1="5.7" y1="5" x2="10.3" y2="5.6"/><line x1="5" y1="6" x2="6.4" y2="10.3"/>'],
   ['tokens','Tokens',null,'<line x1="3.5" y1="13" x2="3.5" y2="8.5" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="13" x2="8" y2="4" stroke-width="2" stroke-linecap="round"/><line x1="12.5" y1="13" x2="12.5" y2="10" stroke-width="2" stroke-linecap="round"/>'],
@@ -662,6 +775,73 @@ function tabHTML(v) {
     ${v.agentRows.length ? v.agentRows.map(a=>`<div data-row class="row" style="padding:14px 16px;display:flex;align-items:center;gap:12px"><span style="width:10px;height:10px;border-radius:50%;background:${a.color};flex-shrink:0;box-shadow:0 0 0 3px ${halo(a.color)}"></span><div style="min-width:0;flex:1"><div style="font-weight:500;font-size:13px">${esc(a.name)}${esc(a.role)}</div><div class="mono" style="font-size:10.5px;color:var(--muted);margin-top:2px">${esc(a.meta)}</div></div><div class="mono" style="text-align:right;flex-shrink:0"><div style="font-size:16px;font-weight:600">${a.writes}</div><div style="font-size:9px;color:var(--dim);letter-spacing:.05em;text-transform:uppercase">writes</div></div></div>`).join('')
       : '<div class="empty"><div class="e-s">No agents match your filter.</div></div>'}
   </div></section>`;
+
+  if (t==='a2a') {
+    const g = v.a2aStats, N = v.a2aNodes, E = v.a2aEdges;
+    if (!N.length) return `<section><div class="empty"><div class="e-s">No agents on this board yet.</div></div></section>`;
+    const defs = E.map((e,i)=>`<path id="fp${i}" d="${e.path}" fill="none"/>`).join('');
+    const wires = E.map((e,i)=>`<use href="#fp${i}" stroke="${e.color}" stroke-width="${e.w}" fill="none" opacity="${e.op*0.42}" stroke-linecap="round"${e.kind==='reject'?' stroke-dasharray="5 4"':''}/>`).join('');
+    /* the moving part: a packet rides the real edge path via SMIL, so it keeps
+       animating across re-renders without a JS timer fighting the poll loop */
+    const packets = E.map((e,i)=>{
+      const n = Math.min(e.n,3);
+      return Array.from({length:n},(_,k)=>`<circle r="${e.hot?4:3}" fill="${e.color}" opacity="${e.op}"><animateMotion dur="${e.dur}s" begin="${(k*e.dur/n).toFixed(2)}s" repeatCount="indefinite"><mpath href="#fp${i}"/></animateMotion>${e.hot?`<animate attributeName="r" values="${e.hot?4:3};${(e.hot?4:3)*1.6};${e.hot?4:3}" dur="1.1s" repeatCount="indefinite"/>`:''}</circle>`).join('');
+    }).join('');
+    /* sub-workers: static satellite nodes, visibly subordinate — smaller, thin
+       tether, muted label. No board identity, so never an edge endpoint. */
+    const subNodes = n => n.subs.map(s=>`<g>
+      <line x1="${n.x}" y1="${n.y}" x2="${s.x}" y2="${s.y}" stroke="${n.color}" stroke-width="1" opacity="${s.live?.5:.22}" stroke-dasharray="3 3"/>
+      <circle cx="${s.x}" cy="${s.y}" r="7.5" fill="var(--card)" stroke="${n.color}" stroke-width="${s.live?1.6:1}" opacity="${s.live?1:.45}"/>
+      ${s.live?`<circle cx="${s.x}" cy="${s.y}" r="7.5" fill="none" stroke="${n.color}" stroke-width="1" opacity=".45"><animate attributeName="r" values="7.5;13;7.5" dur="2.6s" repeatCount="indefinite"/><animate attributeName="opacity" values=".45;0;.45" dur="2.6s" repeatCount="indefinite"/></circle>`:''}
+      <text x="${s.x}" y="${s.y+16}" text-anchor="middle" font-size="9" fill="var(--muted)" opacity="${s.live?1:.5}">${esc(s.name.length>11?s.name.slice(0,10)+'\u2026':s.name)}</text>
+      <title>${esc(s.name)} \u2014 sub-worker of ${esc(n.name)}; does the labour, holds no board identity</title></g>`).join('');
+    const nodes = N.map(n=>`<g>
+      ${subNodes(n)}
+      ${n.live?`<circle cx="${n.x}" cy="${n.y}" r="15" fill="none" stroke="${n.color}" stroke-width="1.5" opacity=".5"><animate attributeName="r" values="15;25;15" dur="2.8s" repeatCount="indefinite"/><animate attributeName="opacity" values=".5;0;.5" dur="2.8s" repeatCount="indefinite"/></circle>`:''}
+      <circle cx="${n.x}" cy="${n.y}" r="13" fill="var(--card)" stroke="${n.color}" stroke-width="${n.live?2.4:1.4}" opacity="${n.live?1:.5}"/>
+      <text x="${n.x}" y="${n.y+3.6}" text-anchor="middle" font-size="10" font-weight="600" fill="${n.color}" opacity="${n.live?1:.55}">${esc(n.name.slice(0,2).toUpperCase())}</text>
+      <text x="${n.x}" y="${n.y+29}" text-anchor="middle" font-size="10.5" fill="var(--text)" opacity="${n.live?1:.5}">${esc(n.name.length>13?n.name.slice(0,12)+'\u2026':n.name)}</text>
+      ${n.role?`<text x="${n.x}" y="${n.y+41}" text-anchor="middle" font-size="9" fill="var(--dim)">${esc(n.role)}</text>`:''}
+      ${n.total?`<g><circle cx="${n.x+11}" cy="${n.y-11}" r="6.5" fill="var(--card)" stroke="${n.color}" stroke-width="1"/><text x="${n.x+11}" y="${n.y-8.6}" text-anchor="middle" font-size="8" font-weight="600" fill="${n.color}">${n.total}</text></g>`:''}
+    </g>`).join('');
+    const kpi=(a,b,c)=>`<div style="flex:1;min-width:88px"><div class="mono" style="font-size:20px;font-weight:600;color:${c||'var(--text)'}">${a}</div><div class="mono" style="font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-top:2px">${b}</div></div>`;
+    const rows = E.slice().sort((x,y)=>y.last-x.last).slice(0,14).map(e=>`<div data-row class="row" style="padding:11px 16px;display:flex;align-items:center;gap:10px">
+      <span style="width:7px;height:7px;border-radius:50%;background:${e.color};flex-shrink:0"></span>
+      <span class="mono" style="font-size:11.5px;color:var(--text)">${esc(e.from)}</span>
+      <span class="mono" style="font-size:11px;color:${e.color}">${e.loop?'\u21ba':'\u2192'}</span>
+      <span class="mono" style="font-size:11.5px;color:var(--text)">${esc(e.to)}</span>
+      <span class="pill mono" style="color:${e.color};background:${soft(e.color)};font-size:10px">${e.kindLabel}</span>
+      ${e.loop?'<span class="mono" style="font-size:10px;color:var(--accent)">solo</span>':''}
+      <span class="mono" style="margin-left:auto;font-size:11px;color:var(--muted)">\u00d7${e.n}</span>
+    </div>`).join('');
+    return `<section>
+      <div class="card" style="margin-bottom:16px;padding:16px 18px">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px">
+          ${kpi(g.live+'/'+g.agents,'agents live','var(--live)')}${kpi(g.transfers,'handoffs')}${kpi(g.edges,'routes')}
+          ${kpi(g.rejects,'rejections',g.rejects?'#ef4444':null)}${kpi(g.solo,'self-loops',g.solo?'var(--accent)':null)}${kpi(g.subs,'sub-workers')}
+        </div>
+        <div class="mono" style="font-size:10.5px;color:var(--muted);line-height:1.55">Every line is a real transfer taken from ticket records \u2014 nothing here is simulated. A self-loop means one agent created, worked and closed a ticket alone. Small orbiting dots are sub-workers a runtime split itself into: they do labour but hold no board identity, so every edge is drawn from the principal that stays accountable.${g.subsHidden?` <b style="color:var(--muted)">${g.subsHidden} finished sub-worker${g.subsHidden===1?'':'s'} hidden</b> \u2014 switch to All subs to see them.`:''}</div>
+      </div>
+      <div class="card" style="padding:6px 6px 14px;overflow:hidden">
+        <div class="cap mono" style="display:flex;align-items:center;gap:10px">
+          <span>Who hands work to whom \u00b7 live</span>
+          ${g.subs?`<div class="seg" style="margin-left:auto;transform:scale(.88);transform-origin:right center">
+            <button data-action="subs" data-arg="live"${state.showIdleSubs?'':' class="on"'}>Working subs</button>
+            <button data-action="subs" data-arg="all"${state.showIdleSubs?' class="on"':''}>All subs</button>
+          </div>`:''}
+        </div>
+        <svg viewBox="0 0 600 440" style="width:100%;height:auto;display:block">
+          <defs>${defs}</defs>${wires}${packets}${nodes}
+        </svg>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center;padding:2px 14px 0">
+          ${g.legend.map(l=>`<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)"><span style="width:14px;height:2.5px;border-radius:2px;background:${l.c}"></span>${l.label} <span class="mono" style="color:var(--text)">${l.n}</span></span>`).join('')}
+        </div>
+      </div>
+      <div class="card" style="overflow:hidden;margin-top:16px"><div class="cap mono">Routes, most recent first</div>
+        ${rows||'<div class="empty"><div class="e-s">No transfers recorded yet.</div></div>'}
+      </div>
+    </section>`;
+  }
 
   if (t==='tickets') {
     const listBody = v.ticketRows.length ? v.ticketRows.map(t=>`<div data-row class="row" style="padding:14px 16px;border-left:2px solid ${t.edge}"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="mono" style="font-size:10.5px;color:var(--dim)">${esc(t.id)}</span><span style="width:7px;height:7px;border-radius:50%;background:${t.priColor}"></span><span class="mono" style="font-size:10px;text-transform:uppercase;color:${t.priColor}">${esc(t.priority)}</span><span class="pill mono" style="color:${t.statusColor};background:${soft(t.statusColor)}">${esc(t.status)}</span>${t.isOrphan?'<span class="mono" style="font-size:10px;color:var(--accent)">⚠ orphan</span>':''}</div><div style="font-weight:500;font-size:13px;margin-top:6px">${esc(t.title)}</div><div class="mono" style="font-size:10.5px;color:var(--muted);margin-top:3px">${esc(t.meta)}</div>${t.isOrphan?`<div style="margin-top:9px;padding:9px 11px;background:var(--accent-soft);border-radius:8px;font-size:11.5px;line-height:1.5"><div><b style="color:var(--accent)">Why flagged:</b> ${t.orphanReason}</div><div style="color:var(--muted);margin-top:3px"><b style="color:var(--text)">Suggested:</b> ${t.orphanAction}</div></div>`:''}</div>`).join('') : '<div class="empty"><div class="e-s">No tickets match your filter.</div></div>';
@@ -786,6 +966,7 @@ document.addEventListener('click', e => {
   else if (a==='win') { state.win=+arg; updateMain(); }
   else if (a==='tl') { state.tlGroup=arg; updateMain(); }
   else if (a==='tview') { state.ticketView=arg; updateMain(); }
+  else if (a==='subs') { state.showIdleSubs = arg==='all'; LS.set('idlesubs', state.showIdleSubs?'1':'0'); updateMain(); }
   else if (a==='palopen') openPalette();
   else if (a==='palgo') { const r=state.palResults[+arg]; if(r) r.go(); }
   else if (a==='palstop') e.stopPropagation();
