@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Idle budget with STAND-DOWN** (#10). `memory_wait_for_event` takes
+  `idle_budget_min` (minutes, default 15; `0` listens indefinitely) and the
+  server counts consecutive empty parks in the agent's watch cursor. When the
+  budget is spent it answers `STAND-DOWN` instead of another idle, so an
+  unattended listener stops on its own rather than looking wedged to whoever is
+  watching. Every idle reply prints its countdown: `idle 3/5 — ~6 min to
+  stand-down`.
+
+  Budgets are stated in **minutes** because a human watching a silent loop is
+  counting wall clock, not iterations — a compliant agent looping for 20
+  minutes looks stuck even when it is exactly on budget. `STAND_DOWN` is a
+  status distinct from `IDLE`, so a loop matching on `idle` to decide whether
+  to re-arm cannot read a stand-down as permission to continue. The counter
+  advances only on a completed empty park and resets only on a real event —
+  never on re-arming, or a tight re-arm loop would reset its own patience and
+  never stand down.
+
+  The `listen` prompt previously said *"Keep going; there is no round budget"*,
+  which would have talked an agent straight past its own stand-down; it now
+  defers to the server.
+
+  **No migration needed** — cursor files written before this carry no
+  `idle_count` and read as zero.
+
+- **`tools/measure_compaction.py`** — measures what thrift compaction actually
+  saves on real board text, with a fidelity gate that fails any unit which lost
+  a protected literal *or* had a title rewritten. `--self-test` proves the gate
+  can go red; a gate that only ever passes proves nothing. Measured 4.9% over
+  17 real board units (o200k_base, gate 17/17). Requires
+  `uv run --with tiktoken`; tiktoken is not a runtime dependency, and without
+  it the harness reports character deltas clearly labelled as a proxy rather
+  than silently substituting one metric for another.
+
+### Changed
+
+- **Board snapshots are mtime-gated** (#12). `_board_snapshot` re-parsed
+  `memories.json` and the ticket index on every 2 s poll tick, per parked
+  listener. It now keys on `(st_mtime_ns, st_size)` of both source files and
+  reuses the cached snapshot while neither has moved — the common case while
+  parked. 25 ticks cost one parse instead of 25. The cached dict is returned by
+  identity under a documented read-only contract.
+
 ## v4.0.0 — Agent-to-Agent (A2A): the listening half of On Board
 
 **Major.** Until now the board was pull-only: an agent learned that a peer

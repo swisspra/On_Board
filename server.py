@@ -3011,16 +3011,77 @@ def _load_watch(agent_name: str):
     legacy = _load(MEMORY_DIR / "watch.json").get("agents", {})
     return legacy.get(agent_name)
 
-def _save_watch(agent_name: str, snapshot: dict):
-    _save(_watch_p(agent_name), {"snapshot": snapshot})
+def _load_watch_idles(agent_name: str) -> int:
+    """Consecutive empty parks this agent has already burned.
+
+    Cursor files written before the idle budget existed carry no such key,
+    so they read as a fresh counter and need no migration.
+    """
+    try:
+        return max(0, int(_load(_watch_p(agent_name)).get("idle_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _save_watch(agent_name: str, snapshot: dict, idle_count: int = 0):
+    _save(_watch_p(agent_name), {"snapshot": snapshot, "idle_count": idle_count})
+
+
+def _idle_budget_idles(idle_budget_min, per_park_s: int):
+    """Minutes of patience -> number of empty parks, rounded up.
+
+    The budget is expressed in minutes because a human watching a listener is
+    counting wall clock, not iterations; the loop can only act on whole parks,
+    so the conversion happens once, here.
+    """
+    if not idle_budget_min or idle_budget_min <= 0:
+        return None
+    per = max(1, int(per_park_s))
+    return max(1, -(-int(idle_budget_min) * 60 // per))
+
+
+_SNAPSHOT_CACHE: dict = {"key": None, "snap": None}
+
+
+def _snapshot_source_key():
+    """Identity of the two files a snapshot is built from.
+
+    (mtime_ns, size) per file. Size is carried alongside mtime because a
+    same-nanosecond rewrite is conceivable on filesystems with coarse clocks;
+    a change that alters neither is not observable here by design.
+    """
+    key = []
+    for path in (_ticket_index_p(), _mem_p()):
+        try:
+            st = path.stat()
+            key.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            key.append(None)
+    return tuple(key)
 
 
 def _board_snapshot() -> dict:
-    """Current board keyed by id, so diffing never depends on list ordering."""
-    return {
+    """Current board keyed by id, so diffing never depends on list ordering.
+
+    Skips the re-parse when neither source file has changed since the last
+    call. A parked listener polls every 2s and the common case is that nothing
+    moved, so this turns a full JSON parse of memories.json + the ticket index
+    into two stat() calls per tick, per listener.
+
+    The cached dict is returned by identity. Treat the result as READ-ONLY:
+    a2a_wait only diffs it, and _reduce_snapshot builds fresh dicts before
+    anything is persisted. A caller that mutates it would poison later ticks.
+    """
+    key = _snapshot_source_key()
+    if _SNAPSHOT_CACHE["snap"] is not None and _SNAPSHOT_CACHE["key"] == key:
+        return _SNAPSHOT_CACHE["snap"]
+    snap = {
         "tickets": {t["id"]: t for t in _load_ticket_index() if t.get("id")},
         "memories": {m["id"]: m for m in _load_mem() if m.get("id")},
     }
+    _SNAPSHOT_CACHE["key"] = key
+    _SNAPSHOT_CACHE["snap"] = snap
+    return snap
 
 
 def _reduce_snapshot(snap: dict) -> dict:
@@ -3048,6 +3109,7 @@ class WaitForEventInput(BaseModel):
     timeout_s: int = Field(default=180, description="Seconds to park. Clamped to 200 unless long_wait.")
     only_mine: bool = Field(default=True, description="Wake only on events assigned to you, unassigned, or on tickets you created")
     long_wait: bool = Field(default=False, description="stdio clients (Claude Code) ONLY — allows up to 3600s. Never set from Claude Desktop: it cancels at ~240s and repeated cancels wedge every connected MCP server until restart.")
+    idle_budget_min: Optional[int] = Field(default=15, description="Minutes of consecutive empty parks before the server answers STAND-DOWN instead of idle. Stated in minutes because that is what a human watching the loop counts. 0 or null listens indefinitely. The counter resets only on a real event, not on re-arming.")
 
 
 @mcp.tool(name="memory_wait_for_event", annotations={"title":"Wait for Board Event","readOnlyHint":True,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
@@ -3069,6 +3131,8 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
     if err: return err
 
     baseline = _load_watch(params.agent_name)
+    per_park = a2a_wait.clamp_timeout(params.timeout_s, desktop_safe=not params.long_wait)
+    budget_idles = _idle_budget_idles(params.idle_budget_min, per_park)
 
     result = await a2a_wait.wait_for_events(
         _board_snapshot,
@@ -3079,14 +3143,29 @@ async def memory_wait_for_event(params: WaitForEventInput) -> str:
         timeout_s=params.timeout_s,
         desktop_safe=not params.long_wait,
         heartbeat_fn=lambda: _touch_heartbeat(params.agent_name),
+        idle_count=_load_watch_idles(params.agent_name),
+        idle_budget_idles=budget_idles,
     )
 
     # Sole writer of this agent's cursor file — no cross-process RMW.
-    _save_watch(params.agent_name, _reduce_snapshot(result["snapshot"]))
+    _save_watch(params.agent_name, _reduce_snapshot(result["snapshot"]),
+                idle_count=result["idle_count"])
 
-    if result["status"] == "idle":
-        return (f"😴 Nothing in {result['timeout_s']}s — board unchanged.\n"
-                f"Call `memory_wait_for_event` again to keep listening.")
+    if result["status"] == a2a_wait.STAND_DOWN:
+        spent_min = round(result["idle_count"] * result["timeout_s"] / 60)
+        return (f"🛑 STAND-DOWN after {result['idle_count']} empty parks (~{spent_min} min).\n"
+                f"The board did not move. Do NOT re-arm on your own — stop listening, "
+                f"report what you were waiting for, and hand back to the human.\n"
+                f"To keep going anyway, call again with a fresh `idle_budget_min`.")
+
+    if result["status"] == a2a_wait.IDLE:
+        line = f"😴 Nothing in {result['timeout_s']}s — board unchanged."
+        if budget_idles:
+            left = max(0, budget_idles - result["idle_count"])
+            mins = round(left * result["timeout_s"] / 60)
+            line += (f"\nidle {result['idle_count']}/{budget_idles}"
+                     f" — ~{mins} min to stand-down")
+        return line + "\nCall `memory_wait_for_event` again to keep listening."
 
     head = f"🔔 {result['event_count']} event(s) after {result['waited_s']}s"
     if result["drained_backlog"]:
@@ -3123,9 +3202,13 @@ def prompt_listen(agent_name: str = "claude", timeout_s: str = "180") -> str:
         f"2. Act on every event it returns — claim tickets addressed to you, "
         f"review submissions on tickets you created, and on a rejection read the "
         f"fix instructions carried in the payload and retry without asking.\n"
-        f"3. Re-arm by calling it again. Keep going; there is no round budget.\n"
-        f"4. Stop only when I say STOP, or once the board has been idle long "
-        f"enough that waiting is pointless, then summarise what happened.\n\n"
+        f"3. Re-arm by calling it again. The server keeps the patience budget, "
+        f"so you do not have to count rounds yourself.\n"
+        f"4. If a call comes back STAND-DOWN, stop. Do not re-arm on your own "
+        f"judgement — summarise what you were waiting for and hand back to me. "
+        f"Pass `idle_budget_min` to widen or disable the budget (0 listens "
+        f"forever); the countdown prints on every idle reply.\n"
+        f"5. Stop also when I say STOP.\n\n"
         f"Do not check in with me between cycles — just keep listening.\n"
         f"When you write to the board (claims, submits, reviews), follow BOARD STYLE from onboarding: compressed English for machine-read fields, verbatim code/paths/IDs.\n\n"
         f"Measured 2026-07-26 across two live Desktop instances: the ~240s client "

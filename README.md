@@ -284,9 +284,16 @@ Claude × Codex (GPT):
 - **Client limits respected** — Claude Desktop cancels tool calls at ~240 s
   *per call* (measured), so timeouts clamp to 200 s there; stdio clients
   (Claude Code, Codex) may pass `long_wait` and park much longer.
-- Use the `listen` MCP prompt for the standard re-arm loop, and state stop
-  budgets in **minutes**, not idle counts — a compliant agent looping silently
-  for 20 minutes looks stuck to a human even when it is exactly on budget.
+- **Idle budget, in minutes** — the server counts consecutive empty parks and
+  answers `STAND-DOWN` once `idle_budget_min` (default 15) is spent, so an
+  unattended listener stops on its own instead of looking wedged. Budgets are
+  stated in minutes because a human watching a silent loop counts wall clock,
+  not iterations — a compliant agent looping for 20 minutes looks stuck even
+  when it is exactly on budget. Every idle reply prints `idle 3/5 — ~6 min to
+  stand-down`. The counter resets on a real event and never on re-arming, and
+  `STAND-DOWN` is a distinct status so a loop matching on `idle` cannot read it
+  as permission to continue. `idle_budget_min=0` listens indefinitely.
+- Use the `listen` MCP prompt for the standard re-arm loop.
 
 v4 also hardens the board for simultaneous writers (advisory lock on ticket
 mutations, per-process tmp files), because with A2A two agents acting in the

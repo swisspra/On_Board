@@ -34,6 +34,17 @@ import asyncio
 import time
 from typing import Any, Callable, Iterable, Optional
 
+# --- wait outcomes -------------------------------------------------------
+#
+# STAND_DOWN is deliberately not a flavour of IDLE. A listen loop that keys
+# off "idle" to decide whether to re-arm must not be able to read a
+# stand-down as a cue to keep going.
+
+HIT = "hit"
+IDLE = "idle"
+STAND_DOWN = "stand_down"
+
+
 # --- event kinds ---------------------------------------------------------
 
 TICKET_CREATED = "ticket_created"
@@ -267,6 +278,8 @@ async def wait_for_events(
     desktop_safe: bool = True,
     poll_interval_s: float = DEFAULT_POLL_INTERVAL_S,
     heartbeat_fn: Optional[Callable[[], None]] = None,
+    idle_count: int = 0,
+    idle_budget_idles: Optional[int] = None,
     sleep_fn: Optional[Callable] = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict:
@@ -303,10 +316,11 @@ async def wait_for_events(
         backlog = diff_events(baseline, current, agent_name=agent_name,
                               kinds=kinds, only_mine=only_mine)
         if backlog:
-            return {"status": "hit", "events": backlog,
+            return {"status": HIT, "events": backlog,
                     "event_count": len(backlog), "waited_s": 0.0,
                     "timeout_s": budget, "snapshot": current,
-                    "drained_backlog": True}
+                    "drained_backlog": True,
+                    "idle_count": 0, "idle_budget_idles": idle_budget_idles}
     else:
         baseline = current
 
@@ -317,15 +331,23 @@ async def wait_for_events(
         events = diff_events(baseline, current, agent_name=agent_name,
                              kinds=kinds, only_mine=only_mine)
         if events:
-            return {"status": "hit", "events": events,
+            return {"status": HIT, "events": events,
                     "event_count": len(events),
                     "waited_s": round(clock() - started, 2),
                     "timeout_s": budget, "snapshot": current,
-                    "drained_backlog": False}
+                    "drained_backlog": False,
+                    "idle_count": 0, "idle_budget_idles": idle_budget_idles}
         # Advance the baseline so filtered-out churn is not re-diffed forever.
         baseline = current
 
-    return {"status": "idle", "events": [], "event_count": 0,
+    # A completed park with nothing to show for it. The counter only advances
+    # here and is only reset by a hit, so a loop that re-arms immediately
+    # still walks toward stand-down instead of resetting itself forever.
+    spent = idle_count + 1
+    exhausted = idle_budget_idles is not None and spent >= idle_budget_idles
+    return {"status": STAND_DOWN if exhausted else IDLE,
+            "events": [], "event_count": 0,
             "waited_s": round(clock() - started, 2),
             "timeout_s": budget, "snapshot": current,
-            "drained_backlog": False}
+            "drained_backlog": False,
+            "idle_count": spent, "idle_budget_idles": idle_budget_idles}
