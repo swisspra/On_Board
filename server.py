@@ -784,6 +784,13 @@ class MemoryWriteInput(BaseModel):
     related_tickets: Optional[List[str]] = Field(default_factory=list)
     priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin). 3 means NEVER COMPACT THIS, not merely important — an auto-pinned entry is exempt from compaction forever and competes for the 5 onboarding slots. Use 1-2 for ordinary progress and findings.")
     pinned_summary: Optional[str] = Field(default=None, description="One-line summary for priority=3 pinned memory; raw content is still stored in full", max_length=500)
+    retracts: Optional[str] = Field(default=None, description="Memory ID this entry retracts; target is unpinned and linked both ways")
+
+class MemoryUnpinInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    agent_name: str = Field(..., min_length=1, max_length=100)
+    memory_id: str = Field(..., min_length=1, max_length=100)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 class MemoryReadInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -1224,6 +1231,11 @@ async def memory_write(params: MemoryWriteInput) -> str:
     if err: return err
     _touch_heartbeat(params.agent_name)
     mem = _load_mem()
+    retracted = None
+    if params.retracts:
+        retracted = next((m for m in mem if m.get("id") == params.retracts), None)
+        if retracted is None:
+            return f"❌ Cannot retract memory `{params.retracts}`: target not found. No changes made."
     duplicate = _recent_duplicate_memory(mem, params)
     if duplicate:
         return (
@@ -1233,11 +1245,21 @@ async def memory_write(params: MemoryWriteInput) -> str:
         )
     priority = params.priority or 0
     is_pinned = priority >= 3
-    entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": params.memory_type,
+    entry_id = _id()
+    entry = {"id": entry_id, "agent_name": params.agent_name, "memory_type": params.memory_type,
              "title": params.title, "content": params.content, "tags": params.tags or [],
              "related_files": params.related_files or [], "related_tickets": params.related_tickets or [],
              "priority": priority,
              "pinned": is_pinned, "created_at": _now(), "timestamp": time.time()}
+    if retracted:
+        retracted["pinned"] = False
+        retracted.pop("pinned_summary", None)
+        retracted["priority"] = 1
+        if not str(retracted.get("title", "")).startswith("[RETRACTED]"):
+            retracted["title"] = f"[RETRACTED] {retracted.get('title', '')}"
+        retracted["retracted_by"] = entry_id
+        retracted["retracted_at"] = _now()
+        entry["retracts"] = retracted["id"]
     mem.append(_finalize_memory_entry(entry, params.pinned_summary)); _save_mem(mem)
     agents = _load_agt()
     for a in agents.values():
@@ -1252,7 +1274,28 @@ async def memory_write(params: MemoryWriteInput) -> str:
         links.append("files: " + ", ".join(f"`{f}`" for f in entry["related_files"][:5]))
     link_line = "\n" + " | ".join(links) if links else ""
     summary_line = f"\n📌 Pinned summary: {entry['pinned_summary']}" if is_pinned else ""
-    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}"
+    retract_line = f"\n↩️ Retracted `{retracted['id']}`" if retracted else ""
+    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}{retract_line}"
+
+@mcp.tool(name="memory_unpin", annotations={"title":"Unpin Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+async def memory_unpin(params: MemoryUnpinInput) -> str:
+    """Unpin a memory without deleting it, preserving the audit record."""
+    err = _require_joined(params.agent_name)
+    if err: return err
+    _touch_heartbeat(params.agent_name)
+    mem = _load_mem()
+    target = next((m for m in mem if m.get("id") == params.memory_id), None)
+    if target is None:
+        return f"❌ Memory `{params.memory_id}` not found. No changes made."
+    target["pinned"] = False
+    target.pop("pinned_summary", None)
+    target["priority"] = 1
+    target["unpinned_by"] = params.agent_name
+    target["unpinned_at"] = _now()
+    if params.reason:
+        target["unpin_reason"] = params.reason
+    _save_mem(mem)
+    return f"🔓 Unpinned `{target['id']}` — **{target.get('title', 'Untitled')}**; entry retained."
 
 @mcp.tool(name="memory_read", annotations={"title":"Read Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_read(params: MemoryReadInput) -> str:

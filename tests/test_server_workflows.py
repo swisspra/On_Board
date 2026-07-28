@@ -594,6 +594,56 @@ def test_priority_three_memory_auto_pins_with_compact_summary_and_raw_content(tm
     assert memory["pinned_summary"] in briefing
 
 
+def test_memory_write_retracts_and_links_without_deleting_target(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active", "last_activity": time.time()}})
+
+    original = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="warning", title="False pinned diagnosis",
+        content="This diagnosis is no longer correct.", priority=3,
+        pinned_summary="Wrong diagnosis; must be retracted.")))
+    target_id = server._load_mem()[0]["id"]
+    result = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="discovery", title="Correction",
+        content="The previous diagnosis was incorrect.", retracts=target_id)))
+
+    memories = server._load_mem()
+    target = next(m for m in memories if m["id"] == target_id)
+    correction = next(m for m in memories if m["title"] == "Correction")
+    assert "Saved" in original and "Retracted" in result
+    assert len(memories) == 2
+    assert target["pinned"] is False
+    assert target["priority"] == 1
+    assert "pinned_summary" not in target
+    assert target["title"] == "[RETRACTED] False pinned diagnosis"
+    assert target["retracted_by"] == correction["id"]
+    assert correction["retracts"] == target_id
+
+
+def test_memory_unpin_missing_id_is_non_mutating(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active", "last_activity": time.time()}})
+    server._save_mem([{"id": "m1", "title": "Pinned", "content": "keep", "pinned": True, "priority": 3}])
+    before = server._load_mem()
+    result = asyncio.run(server.memory_unpin(server.MemoryUnpinInput(agent_name="codex-main", memory_id="missing")))
+    assert "not found" in result
+    assert server._load_mem() == before
+
+
+def test_memory_write_retract_missing_id_fails_without_mutation(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active", "last_activity": time.time()}})
+    before = server._load_mem()
+    result = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="discovery", title="Unlinked correction",
+        content="Must not be written.", retracts="missing")))
+    assert "target not found" in result
+    assert server._load_mem() == before
+
+
 def test_auto_pinned_system_memories_get_compact_summary(tmp_path):
     server = load_server(tmp_path)
     server._save_prj({"description": "test project", "tech_stack": "python"})
