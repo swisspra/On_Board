@@ -782,7 +782,7 @@ class MemoryWriteInput(BaseModel):
     tags: Optional[List[str]] = Field(default_factory=list)
     related_files: Optional[List[str]] = Field(default_factory=list)
     related_tickets: Optional[List[str]] = Field(default_factory=list)
-    priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin)")
+    priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin). 3 means NEVER COMPACT THIS, not merely important — an auto-pinned entry is exempt from compaction forever and competes for the 5 onboarding slots. Use 1-2 for ordinary progress and findings.")
     pinned_summary: Optional[str] = Field(default=None, description="One-line summary for priority=3 pinned memory; raw content is still stored in full", max_length=500)
 
 class MemoryReadInput(BaseModel):
@@ -791,6 +791,7 @@ class MemoryReadInput(BaseModel):
     tag: Optional[str] = None
     agent_name: Optional[str] = Field(default=None, description="Filter by who wrote it")
     since_minutes: Optional[int] = Field(default=None, ge=1)
+    pinned_only: bool = Field(default=False, description="Only auto-pinned (priority=3) entries. Use this when onboarding reports that the pinned digest is over budget, so you can see everything competing for the 5 slots and consolidate.")
     limit: Optional[int] = Field(default=50, ge=1, le=500)
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
 
@@ -981,13 +982,25 @@ def _onboard_ticket_groups(tickets: list, agent_name: str, agent_platform: str, 
 def _ticket_summary_line(ticket: dict) -> str:
     return f"`{ticket.get('id')}` ({ticket.get('status', '?')}): {_compact_line(ticket.get('title', 'Untitled'), 75)}"
 
-def _onboard_pinned(memories: list) -> list[dict]:
-    type_order = {"blocker": 0, "warning": 1, "decision": 2, "checkpoint": 3}
+def _onboard_pinned(memories: list) -> tuple[list[dict], int]:
+    """Top pinned entries for onboarding, plus how many were cut.
+
+    'discovery' used to be missing from type_order, so it scored 9 and always
+    sorted last: on a board with five pinned blockers/warnings/decisions EVERY
+    discovery was invisible. Worse, a retraction is naturally written as a
+    discovery while the false alarm it withdraws is a warning, so a wrong claim
+    structurally outranked its own correction. Discoveries now rank above
+    checkpoints, and the caller is told the hidden count so the digest can
+    never quietly drop knowledge.
+    """
+    type_order = {"blocker": 0, "warning": 1, "decision": 2,
+                  "discovery": 3, "checkpoint": 4}
     pinned = [m for m in memories if m.get("pinned") and m.get("memory_type") != MemoryType.HANDOFF]
-    return sorted(
+    ordered = sorted(
         pinned,
         key=lambda m: (type_order.get(m.get("memory_type"), 9), -m.get("timestamp", 0)),
-    )[:ONBOARD_PINNED_LIMIT]
+    )
+    return ordered[:ONBOARD_PINNED_LIMIT], max(0, len(ordered) - ONBOARD_PINNED_LIMIT)
 
 def _format_compact_onboard(params: OnboardInput, aid: str, rejoined: bool, agents: dict) -> str:
     prj = _load_prj()
@@ -1072,12 +1085,25 @@ def _format_compact_onboard(params: OnboardInput, aid: str, rejoined: bool, agen
             if len(queue_tickets) > ONBOARD_QUEUE_TICKET_LIMIT:
                 lines.append(f"  - ... {len(queue_tickets) - ONBOARD_QUEUE_TICKET_LIMIT} more; call `memory_list_tickets`.")
 
-    pinned = _onboard_pinned(mem)
+    pinned, pinned_hidden = _onboard_pinned(mem)
     lines.extend(["", "## Pinned Critical Memory"])
     if pinned:
         for memory in pinned:
             summary = memory.get("pinned_summary") or _pinned_summary(memory.get("title", ""), memory.get("content", ""))
             lines.append(f"- [{str(memory.get('memory_type', '?')).upper()}] {_compact_line(memory.get('title', ''), 70)}: {_compact_line(summary, 110)}")
+        if pinned_hidden:
+            # Silent truncation is how a board rots: entries stay pinned
+            # forever, priority=3 gets used as "this matters" instead of
+            # "never compact this", and knowledge falls off the bottom unseen.
+            lines.append(
+                f"- \u26a0\ufe0f **{pinned_hidden} more pinned {'entry' if pinned_hidden == 1 else 'entries'} NOT shown**"
+                f" (showing {len(pinned)} of {len(pinned) + pinned_hidden})."
+                " The pinned digest is over budget, so act before starting work:"
+                " call `memory_read(pinned_only=true)` to see them all, fold anything"
+                " still true into ONE consolidated entry, and demote the rest"
+                " (resolved rejections, retracted warnings, superseded checkpoints)."
+                " priority=3 means *never compact this*, not *this is important*."
+            )
     else:
         lines.append("- None.")
 
@@ -1238,6 +1264,7 @@ async def memory_read(params: MemoryReadInput) -> str:
     if params.tag: f = [m for m in f if params.tag in m.get("tags",[])]
     if params.agent_name: f = [m for m in f if m.get("agent_name") == params.agent_name]
     if params.since_minutes: cut = time.time()-(params.since_minutes*60); f = [m for m in f if m.get("timestamp",0) >= cut]
+    if params.pinned_only: f = [m for m in f if m.get("pinned")]
     f.sort(key=lambda m: m.get("timestamp",0), reverse=True); f = f[:params.limit]
     if not f: return "No matches."
     if params.response_format == ResponseFormat.JSON: return json.dumps(f, indent=2)
