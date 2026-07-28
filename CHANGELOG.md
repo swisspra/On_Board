@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## v4.0.1
+
+Patch release. Everything here is polish and correction on top of v4.0.0,
+found by actually running v4 between two Claude Desktop instances and a Codex
+agent rather than by reading it.
+
+Note on the number: `memory_unpin` is a new tool and `retracts=` /
+`idle_budget_min` are new fields, which a strict reading of semver would call a
+minor. Shipped as a patch deliberately, because v4.0.0 had no production
+consumers yet and all of it is repair of that release.
 
 ### Added
 
@@ -28,14 +37,57 @@
   **No migration needed** — cursor files written before this carry no
   `idle_count` and read as zero.
 
-- **`tools/measure_compaction.py`** — measures what thrift compaction actually
-  saves on real board text, with a fidelity gate that fails any unit which lost
-  a protected literal *or* had a title rewritten. `--self-test` proves the gate
-  can go red; a gate that only ever passes proves nothing. Measured 4.9% over
-  17 real board units (o200k_base, gate 17/17). Requires
-  `uv run --with tiktoken`; tiktoken is not a runtime dependency, and without
-  it the harness reports character deltas clearly labelled as a proxy rather
-  than silently substituting one metric for another.
+- **`memory_unpin`** (#16) — demotes a pinned memory without deleting it.
+  `priority=3` means *never compact this*, not *important*: an auto-pinned entry
+  is exempt from compaction forever and competes for the 5 onboarding slots, and
+  until now there was no way to undo one. A board accumulated pinned rejection
+  warnings for tickets that had long since closed, and a warning later found to
+  be **wrong** stayed pinned at critical, so every joining agent read a bug that
+  did not exist as the first thing on the board. Clears `pinned` and
+  `pinned_summary`, drops priority to 1, records `unpinned_by` / `unpinned_at` /
+  `unpin_reason`. The entry stays in `memories.json`.
+
+- **`retracts=` on `memory_write`** (#16) — a correction demotes what it
+  corrects, in one call. The target gains a `[RETRACTED]` prefix and a
+  `retracted_by` back-link; the new entry gets a `retracts` forward-link. A
+  bogus target id is refused *before* the new entry is appended, so a failed
+  retraction leaves nothing behind.
+
+- **Rejection warnings auto-demote on terminal states** (#16) — retitled
+  `[RESOLVED:closed|canceled|terminated]` once their ticket resolves, wired at
+  all three sites. Discrimination is by the `auto-rejection` tag plus
+  `related_tickets`, never by title string, so a human's hand-written warning
+  about the same ticket is left alone. **Forward-only: existing pinned rejection
+  warnings are not backfilled** — clear them with `memory_unpin`.
+
+- **The server declares its own identity** (#13) — `website_url`, plus an icon
+  as a `data:` URI when `docs/assets/on-board-icon.png` exists. A client that
+  cannot resolve a server's identity substitutes whatever it has cached: Codex
+  rendered On Board under the name and logo of an unrelated shopping connector.
+  No placeholder branding is invented; with no file present, nothing is
+  declared.
+
+### Fixed
+
+- **Submitting no longer hands off an agent that owes a review** (#13). If the
+  submitter owns another ticket already sitting in `submitted`, leaving strands
+  it — observed live: an agent submitted its own ticket, auto-handed off, and
+  its peer's submission sat unreviewed with nobody on board to adjudicate. The
+  reply now names the ticket that is owed. Narrow by design: with nothing owed,
+  the previous behaviour stands.
+
+- **The self-review denial no longer tells a solo owner to ask itself** (#13).
+  The message reports `created_by`, which was always correct — but on a solo
+  `create → claim → do` cycle that is the same agent, so a correct lookup
+  produced a useless sentence. It now names the role in that case.
+
+- **Ticket `.md` files no longer carry `TicketStatus.SUBMITTED` forever** (#13).
+  Two bugs in one line: f-string formatting of a `str`-mixin Enum yields the
+  repr on Python 3.11+, and the file was written at submit and never rewritten,
+  so closed tickets still read `submitted`. `_index.json` remains the source of
+  truth, but a human diagnosing a problem reads the `.md` — a stale one is how a
+  reviewer here concluded a rejection had been silently reverted when the ticket
+  had simply been re-submitted.
 
 ### Changed
 
