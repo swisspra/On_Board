@@ -423,7 +423,18 @@ def _unpin_memory_entry(entry: dict, actor: str, reason: Optional[str] = None) -
         entry["unpin_reason"] = reason
 
 def _demote_rejection_warnings(mem: list, ticket_id: str, resolution: str, actor: str) -> bool:
-    """Demote only structured, auto-generated rejection warnings for a ticket."""
+    """Demote only structured, auto-generated rejection warnings for a ticket.
+
+    Keyed on the 'auto-rejection' tag plus related_tickets, never on the title
+    string: a human's hand-written warning about the same ticket is not the
+    board's to demote, and title matching cannot tell the two apart.
+
+    FORWARD-ONLY BY DESIGN, no backfill. Rejection warnings written before the
+    tag existed carry ['ticket', 'rejected'] and no related_tickets, so they are
+    indistinguishable from a human's warning and are left pinned. Clear them
+    with memory_unpin rather than widening this match, which would mean
+    reintroducing exactly the title matching the tag replaced.
+    """
     changed = False
     prefix = f"[RESOLVED:{resolution}]"
     for entry in mem:
@@ -1277,9 +1288,11 @@ async def memory_write(params: MemoryWriteInput) -> str:
              "priority": priority,
              "pinned": is_pinned, "created_at": _now(), "timestamp": time.time()}
     if retracted:
-        retracted["pinned"] = False
-        retracted.pop("pinned_summary", None)
-        retracted["priority"] = 1
+        # Same demotion helper the unpin tool uses, so a retracted entry gets
+        # the same unpinned_by/unpinned_at audit as one demoted by hand.
+        # Retraction keeps its own fields too: they say WHICH entry supersedes
+        # this one, which the unpin fields cannot express.
+        _unpin_memory_entry(retracted, params.agent_name, f"retracted by {entry_id}")
         if not str(retracted.get("title", "")).startswith("[RETRACTED]"):
             retracted["title"] = f"[RETRACTED] {retracted.get('title', '')}"
         retracted["retracted_by"] = entry_id
