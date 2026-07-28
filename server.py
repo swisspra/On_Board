@@ -412,6 +412,42 @@ def _finalize_memory_entry(entry: dict, pinned_summary: Optional[str] = None) ->
         entry["pinned_summary"] = _pinned_summary(entry.get("title", ""), entry.get("content", ""), pinned_summary)
     return entry
 
+def _unpin_memory_entry(entry: dict, actor: str, reason: Optional[str] = None) -> None:
+    """Demote a memory in-place while retaining its audit record."""
+    entry["pinned"] = False
+    entry.pop("pinned_summary", None)
+    entry["priority"] = 1
+    entry["unpinned_by"] = actor
+    entry["unpinned_at"] = _now()
+    if reason:
+        entry["unpin_reason"] = reason
+
+def _demote_rejection_warnings(mem: list, ticket_id: str, resolution: str, actor: str) -> bool:
+    """Demote only structured, auto-generated rejection warnings for a ticket.
+
+    Keyed on the 'auto-rejection' tag plus related_tickets, never on the title
+    string: a human's hand-written warning about the same ticket is not the
+    board's to demote, and title matching cannot tell the two apart.
+
+    FORWARD-ONLY BY DESIGN, no backfill. Rejection warnings written before the
+    tag existed carry ['ticket', 'rejected'] and no related_tickets, so they are
+    indistinguishable from a human's warning and are left pinned. Clear them
+    with memory_unpin rather than widening this match, which would mean
+    reintroducing exactly the title matching the tag replaced.
+    """
+    changed = False
+    prefix = f"[RESOLVED:{resolution}]"
+    for entry in mem:
+        if not entry.get("pinned") or "auto-rejection" not in entry.get("tags", []):
+            continue
+        if ticket_id not in entry.get("related_tickets", []):
+            continue
+        _unpin_memory_entry(entry, actor, f"ticket {ticket_id} reached {resolution}")
+        if not str(entry.get("title", "")).startswith(prefix):
+            entry["title"] = f"{prefix} {entry.get('title', '')}"
+        changed = True
+    return changed
+
 def _minutes_ago(ts: object) -> str:
     try:
         return f"{max(0, int((time.time() - float(ts)) // 60))}m"
@@ -784,6 +820,13 @@ class MemoryWriteInput(BaseModel):
     related_tickets: Optional[List[str]] = Field(default_factory=list)
     priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin). 3 means NEVER COMPACT THIS, not merely important — an auto-pinned entry is exempt from compaction forever and competes for the 5 onboarding slots. Use 1-2 for ordinary progress and findings.")
     pinned_summary: Optional[str] = Field(default=None, description="One-line summary for priority=3 pinned memory; raw content is still stored in full", max_length=500)
+    retracts: Optional[str] = Field(default=None, description="Memory ID this entry retracts; target is unpinned and linked both ways")
+
+class MemoryUnpinInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    agent_name: str = Field(..., min_length=1, max_length=100)
+    memory_id: str = Field(..., min_length=1, max_length=100)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 class MemoryReadInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -1224,6 +1267,11 @@ async def memory_write(params: MemoryWriteInput) -> str:
     if err: return err
     _touch_heartbeat(params.agent_name)
     mem = _load_mem()
+    retracted = None
+    if params.retracts:
+        retracted = next((m for m in mem if m.get("id") == params.retracts), None)
+        if retracted is None:
+            return f"❌ Cannot retract memory `{params.retracts}`: target not found. No changes made."
     duplicate = _recent_duplicate_memory(mem, params)
     if duplicate:
         return (
@@ -1233,11 +1281,23 @@ async def memory_write(params: MemoryWriteInput) -> str:
         )
     priority = params.priority or 0
     is_pinned = priority >= 3
-    entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": params.memory_type,
+    entry_id = _id()
+    entry = {"id": entry_id, "agent_name": params.agent_name, "memory_type": params.memory_type,
              "title": params.title, "content": params.content, "tags": params.tags or [],
              "related_files": params.related_files or [], "related_tickets": params.related_tickets or [],
              "priority": priority,
              "pinned": is_pinned, "created_at": _now(), "timestamp": time.time()}
+    if retracted:
+        # Same demotion helper the unpin tool uses, so a retracted entry gets
+        # the same unpinned_by/unpinned_at audit as one demoted by hand.
+        # Retraction keeps its own fields too: they say WHICH entry supersedes
+        # this one, which the unpin fields cannot express.
+        _unpin_memory_entry(retracted, params.agent_name, f"retracted by {entry_id}")
+        if not str(retracted.get("title", "")).startswith("[RETRACTED]"):
+            retracted["title"] = f"[RETRACTED] {retracted.get('title', '')}"
+        retracted["retracted_by"] = entry_id
+        retracted["retracted_at"] = _now()
+        entry["retracts"] = retracted["id"]
     mem.append(_finalize_memory_entry(entry, params.pinned_summary)); _save_mem(mem)
     agents = _load_agt()
     for a in agents.values():
@@ -1252,7 +1312,22 @@ async def memory_write(params: MemoryWriteInput) -> str:
         links.append("files: " + ", ".join(f"`{f}`" for f in entry["related_files"][:5]))
     link_line = "\n" + " | ".join(links) if links else ""
     summary_line = f"\n📌 Pinned summary: {entry['pinned_summary']}" if is_pinned else ""
-    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}"
+    retract_line = f"\n↩️ Retracted `{retracted['id']}`" if retracted else ""
+    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}{retract_line}"
+
+@mcp.tool(name="memory_unpin", annotations={"title":"Unpin Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+async def memory_unpin(params: MemoryUnpinInput) -> str:
+    """Unpin a memory without deleting it, preserving the audit record."""
+    err = _require_joined(params.agent_name)
+    if err: return err
+    _touch_heartbeat(params.agent_name)
+    mem = _load_mem()
+    target = next((m for m in mem if m.get("id") == params.memory_id), None)
+    if target is None:
+        return f"❌ Memory `{params.memory_id}` not found. No changes made."
+    _unpin_memory_entry(target, params.agent_name, params.reason)
+    _save_mem(mem)
+    return f"🔓 Unpinned `{target['id']}` — **{target.get('title', 'Untitled')}**; entry retained."
 
 @mcp.tool(name="memory_read", annotations={"title":"Read Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_read(params: MemoryReadInput) -> str:
@@ -2805,6 +2880,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
 
                 # Log as memory
                 mem = _load_mem()
+                _demote_rejection_warnings(mem, t["id"], "closed", params.agent_name)
                 mem.append({
                     "id": _id(), "agent_name": params.agent_name,
                     "memory_type": MemoryType.PROGRESS,
@@ -2874,7 +2950,8 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     "memory_type": MemoryType.WARNING,
                     "title": f"❌ Rejected {t['id']}: {t['title']}",
                     "content": f"Rejected work by `{t.get('claimed_by','?')}`. {params.review_notes[:200]}\nFix: {(params.fix_instructions or 'See rejection note')[:200]}",
-                    "tags": ["ticket","rejected"], "related_files": [],
+                    "tags": ["ticket", "rejected", "auto-rejection"], "related_files": [],
+                    "related_tickets": [t["id"]],
                     "priority": 2, "pinned": True, "created_at": _now(), "timestamp": time.time()
                 }))
                 _save_mem(mem)
@@ -2911,6 +2988,9 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
             if reason:
                 t["cancel_reason"] = reason
             _save_ticket_index(idx)
+            mem = _load_mem()
+            if _demote_rejection_warnings(mem, t["id"], "canceled", agent_name):
+                _save_mem(mem)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."
@@ -2938,6 +3018,9 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
             if reason:
                 t["terminate_reason"] = reason
             _save_ticket_index(idx)
+            mem = _load_mem()
+            if _demote_rejection_warnings(mem, t["id"], "terminated", agent_name):
+                _save_mem(mem)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."

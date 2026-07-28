@@ -594,6 +594,88 @@ def test_priority_three_memory_auto_pins_with_compact_summary_and_raw_content(tm
     assert memory["pinned_summary"] in briefing
 
 
+def test_memory_write_retracts_and_links_without_deleting_target(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active", "last_activity": time.time()}})
+
+    original = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="warning", title="False pinned diagnosis",
+        content="This diagnosis is no longer correct.", priority=3,
+        pinned_summary="Wrong diagnosis; must be retracted.")))
+    target_id = server._load_mem()[0]["id"]
+    result = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="discovery", title="Correction",
+        content="The previous diagnosis was incorrect.", retracts=target_id)))
+
+    memories = server._load_mem()
+    target = next(m for m in memories if m["id"] == target_id)
+    correction = next(m for m in memories if m["title"] == "Correction")
+    assert "Saved" in original and "Retracted" in result
+    assert len(memories) == 2
+    assert target["pinned"] is False
+    assert target["priority"] == 1
+    assert "pinned_summary" not in target
+    assert target["title"] == "[RETRACTED] False pinned diagnosis"
+    assert target["retracted_by"] == correction["id"]
+    assert correction["retracts"] == target_id
+    # Retraction is a demotion, so it must leave the same audit trail as an
+    # explicit unpin. Without this the board can say WHAT superseded an entry
+    # but not who demoted it or when, and only for retractions -- an asymmetry
+    # that is invisible until someone audits the one case that lacks it.
+    assert target["unpinned_by"] == "codex-main"
+    assert target["unpinned_at"]
+    assert correction["id"] in target["unpin_reason"]
+
+
+def test_legacy_rejection_warning_is_left_pinned(tmp_path):
+    """Demotion is forward-only: no 'auto-rejection' tag, no demotion.
+
+    A pre-tag rejection warning is indistinguishable from a human's warning
+    about the same ticket, and demoting a human's warning would be worse than
+    leaving a stale one pinned. memory_unpin is the remedy, not a wider match.
+    """
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active",
+                             "last_activity": time.time()}})
+
+    asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="warning",
+        title="❌ Rejected TK-000000000000: legacy shape",
+        content="Written before the auto-rejection tag existed.", priority=3,
+        tags=["ticket", "rejected"])))
+
+    mem = server._load_mem()
+    assert server._demote_rejection_warnings(
+        mem, "TK-000000000000", "closed", "codex-main") is False
+    assert mem[0]["pinned"] is True
+    assert not mem[0]["title"].startswith("[RESOLVED")
+
+
+def test_memory_unpin_missing_id_is_non_mutating(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active", "last_activity": time.time()}})
+    server._save_mem([{"id": "m1", "title": "Pinned", "content": "keep", "pinned": True, "priority": 3}])
+    before = server._load_mem()
+    result = asyncio.run(server.memory_unpin(server.MemoryUnpinInput(agent_name="codex-main", memory_id="missing")))
+    assert "not found" in result
+    assert server._load_mem() == before
+
+
+def test_memory_write_retract_missing_id_fails_without_mutation(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    server._save_agt({"a1": {"agent_name": "codex-main", "status": "active", "last_activity": time.time()}})
+    before = server._load_mem()
+    result = asyncio.run(server.memory_write(server.MemoryWriteInput(
+        agent_name="codex-main", memory_type="discovery", title="Unlinked correction",
+        content="Must not be written.", retracts="missing")))
+    assert "target not found" in result
+    assert server._load_mem() == before
+
+
 def test_auto_pinned_system_memories_get_compact_summary(tmp_path):
     server = load_server(tmp_path)
     server._save_prj({"description": "test project", "tech_stack": "python"})
@@ -767,3 +849,57 @@ def test_reviewer_stays_active_after_approve_and_reject(tmp_path):
     assert "Rejected" in reject
     assert "still on board" in reject
     assert server._load_agt()["reviewer"]["status"] == "active"
+
+
+def test_rejection_warning_demotes_on_approve_but_manual_warning_survives(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    now = time.time()
+    server._save_agt({"reviewer": {
+        "agent_name": "codex-reviewer", "agent_platform": "codex",
+        "agent_role": "reviewer", "status": "active", "last_activity": now,
+    }})
+    server._tickets_dir()
+    ticket = {
+        "id": "TK-resolve", "title": "Resolve warning", "description": "d",
+        "target_url": "local", "scope": "READ-ONLY", "required_fields": ["result"],
+        "priority": "medium", "status": "submitted", "created_by": "planner",
+        "assigned_to": None, "claimed_by": "worker", "created_at": "2026-05-08T12:01:00",
+        "updated_at": "2026-05-08T12:01:00", "timestamp": now,
+    }
+    server._save_ticket_index([ticket])
+    server._save_mem([{
+        "id": "manual", "agent_name": "codex-main", "memory_type": "warning",
+        "title": "Manual warning about TK-resolve", "content": "Keep this warning.",
+        "tags": ["ticket", "warning"], "related_tickets": ["TK-resolve"],
+        "priority": 3, "pinned": True, "pinned_summary": "Manual warning.",
+    }])
+
+    reject = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer", ticket_id="TK-resolve", verdict="reject",
+        review_notes="needs evidence", fix_instructions="add proof")))
+    assert "Rejected" in reject
+    rejected_warning = next(m for m in server._load_mem() if "Rejected TK-resolve" in m["title"])
+    assert rejected_warning["pinned"] is True
+    assert rejected_warning["related_tickets"] == ["TK-resolve"]
+    assert "auto-rejection" in rejected_warning["tags"]
+
+    reopened = server._load_ticket_index()[0]
+    reopened["status"] = "submitted"
+    server._save_ticket_index([reopened])
+    approve = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer", ticket_id="TK-resolve", verdict="approve",
+        review_notes="evidence added")))
+    assert "Approved" in approve
+
+    memories = server._load_mem()
+    rejected_warning = next(m for m in memories if "Rejected TK-resolve" in m["title"])
+    manual = next(m for m in memories if m["id"] == "manual")
+    assert rejected_warning["pinned"] is False
+    assert rejected_warning["priority"] == 1
+    assert rejected_warning["title"].startswith("[RESOLVED:closed] ")
+    assert rejected_warning["title"].count("[RESOLVED:closed]") == 1
+    assert manual["pinned"] is True
+
+    server._demote_rejection_warnings(memories, "TK-resolve", "closed", "codex-reviewer")
+    assert next(m for m in memories if "Rejected TK-resolve" in m["title"])["title"].count("[RESOLVED:closed]") == 1
