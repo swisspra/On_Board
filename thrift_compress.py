@@ -128,13 +128,34 @@ def compress(text: str, budget: str = "medium", keep_articles: bool = False) -> 
     return "\n".join(result) + "\n"
 
 
+def _title_fragments(text: str) -> list[str]:
+    fragments = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            fragments.append(stripped)
+            continue
+        if stripped.startswith("- ") and " (`" in stripped:
+            fragments.append(stripped.split(" (`", 1)[0])
+    return fragments
+
+
 def compress_digest(text: str, budget: str = "medium") -> str:
-    """Compress digest body while keeping markdown titles/headings verbatim."""
+    """Compress digest body while keeping entry titles/headings verbatim."""
     lines = []
     for line in text.splitlines():
-        if line.lstrip().startswith("##"):
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
             lines.append(line)
             continue
+        if stripped.startswith("- ") and " (`" in stripped:
+            marker = line.find(" (`")
+            agent_end = line.find("`)", marker + 3)
+            if marker >= 0 and agent_end >= 0:
+                prefix = line[:agent_end + 2]
+                suffix = line[agent_end + 2:]
+                lines.append(prefix + compress(suffix, budget).rstrip("\n"))
+                continue
         match = re.match(r"^(.*?\*\*.*?\*\*)(.*)$", line)
         if match:
             lines.append(match.group(1) + compress(match.group(2), budget).rstrip("\n"))
@@ -143,7 +164,10 @@ def compress_digest(text: str, budget: str = "medium") -> str:
     return "\n".join(lines) + "\n"
 
 
-def fidelity(source: str, compressed: str) -> float:
-    """Return the fraction of protected spans still present verbatim."""
-    tokens = protected_tokens(source)
+def protected_span_fidelity(source: str, compressed: str) -> float:
+    """Return fidelity for protected spans plus digest titles/headings."""
+    tokens = protected_tokens(source) + _title_fragments(source)
     return 1.0 if not tokens else sum(token in compressed for token in tokens) / len(tokens)
+
+
+fidelity = protected_span_fidelity
