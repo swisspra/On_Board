@@ -79,6 +79,27 @@ def test_owner_who_also_executed_still_blocked_by_default():
     assert "allow_self_review" in msg      # the escape hatch is discoverable
 
 
+def test_denial_does_not_tell_the_owner_to_ask_itself():
+    """When owner == executor, naming them reads as a broken message.
+
+    The lookup was always correct — it reports created_by — but on a solo
+    create -> claim -> do cycle that is the same agent being told to go ask
+    itself. Solo users hit this string on every ticket, so it is the most-read
+    denial in the system.
+    """
+    t = tk(created_by=ALICE, claimed_by=ALICE)
+    msg = denied("submitted", "closed", agent_name=ALICE, ticket=t)
+    assert f"Ask `{ALICE}`" not in msg
+    assert "another main/lead/reviewer agent" in msg
+
+
+def test_denial_still_names_a_different_owner():
+    """The narrow fix must not cost the useful case: a real person to ask."""
+    t = tk(created_by=ALICE, claimed_by=BOB)
+    msg = denied("submitted", "closed", agent_name=BOB, ticket=t)
+    assert f"`{ALICE}`" in msg
+
+
 def test_self_review_is_possible_but_marked():
     t = tk(created_by=ALICE, claimed_by=ALICE)
     basis = allowed("submitted", "closed", agent_name=ALICE, ticket=t,

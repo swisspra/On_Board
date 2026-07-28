@@ -15,7 +15,7 @@ Design principles:
 Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
-import json, os, time, hashlib, math, re
+import json, os, time, hashlib, math, re, base64
 import asyncio, functools
 try:
     import fcntl                      # POSIX only
@@ -106,7 +106,41 @@ def _recent_agent_items(agents: dict, limit: int = AGENT_HISTORY_LIMIT) -> list:
     return sorted(agents.items(), key=lambda item: _agent_activity_ts(item[1]), reverse=True)[:limit]
 
 # ── MCP Server ──────────────────────────────────────────
-mcp = FastMCP("onboard_memory_mcp")
+_HOMEPAGE = "https://github.com/swisspra/On_Board"
+_ICON_PATH = Path(__file__).resolve().parent / "docs" / "assets" / "on-board-icon.png"
+
+
+def _server_icons():
+    """Declare a server icon if one is shipped with the source, else declare none.
+
+    A client that cannot resolve a server's identity falls back to whatever it
+    can find: Codex rendered On Board under the name and logo of an unrelated
+    shopping connector it had cached from its app directory. Declaring identity
+    is the only way to stop that from our side.
+
+    A data: URI is used deliberately — this is a local stdio server, so a remote
+    icon fetch would be pointless and would leak a request per client start.
+
+    No placeholder is invented. If the asset is absent we declare nothing, which
+    is honest; dropping a real 128x128 PNG at the path above is the only step
+    needed later. Note the installed SDK's Icon has no `theme` field, so one
+    file must read on both light and dark backgrounds.
+    """
+    try:
+        from mcp.types import Icon
+    except ImportError:
+        return None
+    if not _ICON_PATH.is_file():
+        return None
+    try:
+        payload = base64.b64encode(_ICON_PATH.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+    return [Icon(src=f"data:image/png;base64,{payload}",
+                 mimeType="image/png", sizes=["128x128"])]
+
+
+mcp = FastMCP("onboard_memory_mcp", website_url=_HOMEPAGE, icons=_server_icons())
 
 # ── Enums ───────────────────────────────────────────────
 class MemoryType(str, Enum):
@@ -2517,11 +2551,21 @@ def _auto_transition_claimed(idx: list) -> bool:
                 changed = True
     return changed
 
+def _status_str(value) -> str:
+    """Status as its wire value, never an enum repr.
+
+    On Python 3.11+ f-string formatting of a str-mixin Enum yields
+    'TicketStatus.SUBMITTED', not 'submitted'. Ticket .md files were carrying
+    that repr, which is both wrong and misleading to anyone reading them.
+    """
+    return str(getattr(value, "value", value) or "?")
+
+
 def _write_ticket_md(filepath: Path, data: dict):
     """Write a ticket as a human-readable .md file."""
     lines = [f"# {data.get('title', 'Untitled')}"]
     lines.append(f"**ID**: `{data.get('id', '?')}`")
-    lines.append(f"**Status**: {data.get('status', '?')}")
+    lines.append(f"**Status**: {_status_str(data.get('status'))}")
     lines.append(f"**Priority**: {data.get('priority', '?')}")
     lines.append(f"**Created by**: `{data.get('created_by', '?')}`")
     lines.append(f"**Created at**: {data.get('created_at', '?')}")
@@ -2779,7 +2823,18 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
             # Auto-handoff: agent submitted work, should leave for reviewer.
             # A listening peer passes stay_active=True so it remains on board
             # and can wait for the verdict / take the rejected -> retry path.
-            if not params.stay_active:
+            #
+            # But never hand off an agent that still owes a review. If it owns
+            # another ticket already sitting in 'submitted', leaving now means
+            # that review never happens. Observed live: codex submitted its own
+            # ticket, auto-handed off, and its peer's submission then sat
+            # unreviewed with nobody on board to adjudicate it.
+            owed = [x["id"] for x in idx
+                    if x.get("id") != t["id"]
+                    and x.get("created_by") == params.agent_name
+                    and _status_str(x.get("status")) == TicketStatus.SUBMITTED.value]
+
+            if not params.stay_active and not owed:
                 agents = _load_agt()
                 for a in agents.values():
                     if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
@@ -2808,13 +2863,20 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
             }))
             _save_mem(mem)
 
+            if params.stay_active:
+                closing = "Still on board — re-arm `memory_wait_for_event` to catch the verdict."
+            elif owed:
+                owed_list = ", ".join(f"`{i}`" for i in owed[:3])
+                closing = (f"Kept you on board: you owe a review on {owed_list}. "
+                           f"Adjudicate before leaving — handing off now would strand it.")
+            else:
+                closing = "You're off board. Reviewer will pick this up."
+
             return (
                 f"📤 Submitted `{t['id']}` for review!\n"
                 f"**{t['title']}** by `{params.agent_name}`\n"
                 f"Report: `tickets/review/{t['id']}-submit.md`\n\n"
-                f"🤝 " + ("Still on board — re-arm `memory_wait_for_event` to catch the verdict."
-                          if params.stay_active
-                          else "You're off board. Reviewer will pick this up.")
+                f"🤝 " + closing
             )
     return f"Ticket `{params.ticket_id}` not found."
 
@@ -2866,6 +2928,12 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     shutil.move(str(ticket_file), str(dest / ticket_file.name))
                 if submit_file.exists():
                     shutil.move(str(submit_file), str(dest / submit_file.name))
+                # The moved copy still carries whatever status it had when it
+                # was last written, so closed tickets read 'submitted' forever.
+                # Rewrite it here: _index.json is the source of truth, but a
+                # human diagnosing a problem reads the .md, and a stale one
+                # sends them down the wrong path.
+                _write_ticket_md(dest / f"{t['id']}.md", t)
 
                 # Write review result
                 review_path = dest / f"{t['id']}-review.md"
