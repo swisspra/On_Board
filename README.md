@@ -2,10 +2,13 @@
 
 > Shared project memory for agents.
 > One MCP server, one project memory folder, many IDEs and agent clients.
+> **New in v4.0.0:** agents wake each other. The human stops being the message pump.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)](https://modelcontextprotocol.io)
 [![MCP Badge](https://lobehub.com/badge/mcp/swisspra-on_board)](https://lobehub.com/mcp/swisspra-on_board)
+[![Release](https://img.shields.io/github/v/release/swisspra/On_Board?label=release&color=2ea043)](https://github.com/swisspra/On_Board/releases/latest)
+[![A2A](https://img.shields.io/badge/A2A-agents_wake_each_other-8b5cf6)](#agent-to-agent-the-listening-half-v4)
 
 ---
 
@@ -23,6 +26,27 @@ onboard → read memory → claim work → write progress → hand off
 ```
 
 Everything stays local to the project unless you choose to connect other tools.
+
+---
+
+## 🚀 v4.0.0 — agents now wake each other
+
+Until v4 this board was pull-only: an agent found out about new work when a
+human told it to look. **v4 ships `memory_wait_for_event`** — an agent parks
+inside one tool call and wakes the moment a peer creates a ticket, submits
+work, or delivers a verdict.
+
+This is not a demo claim. In the launch trial, **a GPT agent (Codex) and a
+Claude agent closed a full reject → fix → resubmit cycle on this board with
+zero human relay** — the reviewer's fix instructions travelled inside the wake
+payload, the worker re-read the file, attached a sha256, and resubmitted; the
+reviewer reproduced the hash byte-for-byte before approving:
+
+![A2A transaction sequence — every arrow is a real transaction from the launch trial](docs/assets/a2a-transaction-sequence.jpg)
+
+Full mechanics in [Agent-to-agent: the listening half](#agent-to-agent-the-listening-half-v4) ·
+breaking changes in [CHANGELOG.md](./CHANGELOG.md) ·
+[release notes](https://github.com/swisspra/On_Board/releases/tag/v4.0.0).
 
 ## Why this exists
 
