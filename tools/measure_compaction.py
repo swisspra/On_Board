@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -41,15 +42,55 @@ _PROTECTED = {
     "code":   re.compile(r"`([^`\n]+)`"),
 }
 
+# Titles are a separate class because the literal classes above cannot see
+# them. compress_digest once rewrote plain entry titles while every protected
+# literal survived, and the old fidelity() scored that 1.0 -- a gate blind to
+# the very requirement it exists to enforce. These patterns make that failure
+# expressible. `--self-test` proves they still can.
+_TITLE_SPANS = (
+    ("heading", re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+\S.*$", re.M)),
+    ("bold_title", re.compile(r"^[ \t]*[-*][ \t]+(\*\*.+?\*\*)", re.M)),
+    ("plain_title", re.compile(r"^[ \t]*[-*][ \t]+(.+?)[ \t]+\(`[^`\n]+`\)[ \t]*$", re.M)),
+)
+
 
 def gate(original: str, compressed: str) -> list[str]:
-    """Literals from `original` that did not survive into `compressed`."""
+    """Literals and titles from `original` that did not survive into `compressed`."""
     misses = []
     for label, pattern in _PROTECTED.items():
         for item in set(pattern.findall(original)):
             if item and item not in compressed:
                 misses.append(f"{label}:{item[:60]}")
+    for label, pattern in _TITLE_SPANS:
+        for m in pattern.finditer(original):
+            span = (m.group(1) if m.groups() else m.group(0)).strip()
+            if span and span not in compressed:
+                misses.append(f"{label}:{span[:60]}")
     return misses
+
+
+def self_test() -> int:
+    """Prove the gate can go red. A gate that only ever passes proves nothing."""
+    cases = [
+        ("plain title rewritten",
+         "- Refactored the database configuration in the deployment environment (`bob`)",
+         "- Refactored DB config in deployment env (`bob`)"),
+        ("heading rewritten", "# The database configuration", "# DB config"),
+        ("ticket id dropped", "see TK-96e7e9fd1e88 for detail", "see the ticket for detail"),
+        ("number changed", "saved 17.8% overall", "saved a lot overall"),
+    ]
+    ok = True
+    for name, before, after in cases:
+        misses = gate(before, after)
+        print(f"  {'RED ' if misses else 'GREEN'}  {name}"
+              + (f" -> {misses[0]}" if misses else "  <-- GATE IS BLIND HERE"))
+        ok = ok and bool(misses)
+    clean = gate("- Title kept (`bob`)\n# Heading kept", "- Title kept (`bob`)\n# Heading kept")
+    print(f"  {'GREEN' if not clean else 'RED  '}  unchanged text passes"
+          + (f" -> {clean}" if clean else ""))
+    ok = ok and not clean
+    print("\nself-test", "PASSED" if ok else "FAILED")
+    return 0 if ok else 1
 
 
 # --- corpus loading -------------------------------------------------------
@@ -68,16 +109,24 @@ def _entries_to_units(entries: list, tag: str) -> dict:
 
 
 def from_board(project: Path) -> dict:
-    """Cold (compactable) entries from a live board.
+    """Exactly the entries `memory_compact` would compact -- no more, no less.
+
+    Delegates to server._split_hot_cold so this cannot drift from the server's
+    own rule (HOT_WINDOW_HOURS, MAX_HOT_ENTRIES, pinning). An earlier version
+    approximated cold as priority<3, which ignored the 24h hot window and so
+    measured a corpus larger than compaction actually touches.
 
     A pinned or high-priority entry is exempt from compaction forever, so it
     can never appear in a compaction measurement. Boards whose owner pins
-    everything therefore have no measurable corpus — a property of the board,
-    not a bug in this harness, and the caller is told so plainly.
+    everything therefore have no measurable corpus -- a property of the board,
+    not a bug here, and the caller is told so plainly.
     """
-    mem = json.loads((project / ".agent-mem" / "memories.json").read_text(encoding="utf-8"))
-    entries = mem.get("entries", mem if isinstance(mem, list) else [])
-    cold = [e for e in entries if (e.get("priority") or 0) < 3]
+    os.environ["AGENT_PROJECT_DIR"] = str(project)  # server reads this at import
+    try:
+        import server as S
+    except Exception as exc:  # pragma: no cover - environment dependent
+        raise SystemExit(f"--board needs the server module importable: {exc}")
+    _hot, cold = S._split_hot_cold(S._load_mem())
     return _entries_to_units(cold, "board")
 
 
@@ -97,10 +146,15 @@ def main() -> int:
     src.add_argument("--corpus", type=Path, help="JSON object of {name: text}")
     src.add_argument("--board", type=Path, help="project dir; measures COLD entries only")
     src.add_argument("--archive", type=Path, help="project dir; measures archived entries")
+    src.add_argument("--self-test", action="store_true",
+                     help="prove the fidelity gate can fail, then exit")
     ap.add_argument("--budget", default="medium",
                     help="lossless | verbatim | light | medium | aggressive")
     ap.add_argument("--dump", type=Path, help="write a side-by-side audit file")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     if args.corpus:
         units, origin = from_corpus(args.corpus), f"corpus {args.corpus}"
