@@ -2988,12 +2988,48 @@ def _save_watch(agent_name: str, snapshot: dict):
     _save(_watch_p(agent_name), {"snapshot": snapshot})
 
 
+_SNAPSHOT_CACHE: dict = {"key": None, "snap": None}
+
+
+def _snapshot_source_key():
+    """Identity of the two files a snapshot is built from.
+
+    (mtime_ns, size) per file. Size is carried alongside mtime because a
+    same-nanosecond rewrite is conceivable on filesystems with coarse clocks;
+    a change that alters neither is not observable here by design.
+    """
+    key = []
+    for path in (_ticket_index_p(), _mem_p()):
+        try:
+            st = path.stat()
+            key.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            key.append(None)
+    return tuple(key)
+
+
 def _board_snapshot() -> dict:
-    """Current board keyed by id, so diffing never depends on list ordering."""
-    return {
+    """Current board keyed by id, so diffing never depends on list ordering.
+
+    Skips the re-parse when neither source file has changed since the last
+    call. A parked listener polls every 2s and the common case is that nothing
+    moved, so this turns a full JSON parse of memories.json + the ticket index
+    into two stat() calls per tick, per listener.
+
+    The cached dict is returned by identity. Treat the result as READ-ONLY:
+    a2a_wait only diffs it, and _reduce_snapshot builds fresh dicts before
+    anything is persisted. A caller that mutates it would poison later ticks.
+    """
+    key = _snapshot_source_key()
+    if _SNAPSHOT_CACHE["snap"] is not None and _SNAPSHOT_CACHE["key"] == key:
+        return _SNAPSHOT_CACHE["snap"]
+    snap = {
         "tickets": {t["id"]: t for t in _load_ticket_index() if t.get("id")},
         "memories": {m["id"]: m for m in _load_mem() if m.get("id")},
     }
+    _SNAPSHOT_CACHE["key"] = key
+    _SNAPSHOT_CACHE["snap"] = snap
+    return snap
 
 
 def _reduce_snapshot(snap: dict) -> dict:
