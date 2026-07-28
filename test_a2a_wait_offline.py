@@ -284,6 +284,66 @@ def test_no_baseline_listens_forward_not_backward():
 
 # --- runner --------------------------------------------------------------
 
+# --- idle budget / stand-down (#10) ---------------------------------------
+
+def _run_budget(board, *, idle_count=0, budget=None, baseline=None):
+    clock = FakeClock()
+    return asyncio.run(W.wait_for_events(
+        board.snapshot, agent_name="bob",
+        baseline=board.snapshot() if baseline is None else baseline,
+        timeout_s=180, poll_interval_s=2.0,
+        idle_count=idle_count, idle_budget_idles=budget,
+        sleep_fn=clock.sleep, clock=clock,
+    ))
+
+
+def test_stand_down_is_a_distinct_status():
+    """A loop keying off 'idle' must not be able to read a stand-down as one."""
+    assert W.STAND_DOWN != W.IDLE != W.HIT
+
+
+def test_empty_park_advances_the_counter():
+    res = _run_budget(FakeBoard(), idle_count=0)
+    assert res["status"] == W.IDLE
+    assert res["idle_count"] == 1
+
+
+def test_counter_carries_across_calls():
+    res = _run_budget(FakeBoard(), idle_count=3)
+    assert res["idle_count"] == 4
+
+
+def test_a_hit_resets_the_counter():
+    """Only real work resets patience. Re-arming alone must not."""
+    board = FakeBoard().ticket("T1", created_by="alice")
+    res = _run_budget(board, idle_count=4, budget=5,
+                      baseline={"tickets": {}, "memories": {}})
+    assert res["status"] == W.HIT
+    assert res["idle_count"] == 0
+
+
+def test_stand_down_fires_exactly_at_budget():
+    below = _run_budget(FakeBoard(), idle_count=3, budget=5)
+    assert below["status"] == W.IDLE and below["idle_count"] == 4
+    at = _run_budget(FakeBoard(), idle_count=4, budget=5)
+    assert at["status"] == W.STAND_DOWN and at["idle_count"] == 5
+
+
+def test_overshooting_the_budget_still_stands_down():
+    res = _run_budget(FakeBoard(), idle_count=99, budget=5)
+    assert res["status"] == W.STAND_DOWN
+
+
+def test_no_budget_listens_forever():
+    res = _run_budget(FakeBoard(), idle_count=999, budget=None)
+    assert res["status"] == W.IDLE
+
+
+def test_budget_is_echoed_back_for_rendering():
+    res = _run_budget(FakeBoard(), idle_count=0, budget=5)
+    assert res["idle_budget_idles"] == 5
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
