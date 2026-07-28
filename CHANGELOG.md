@@ -67,7 +67,29 @@ consumers yet and all of it is repair of that release.
   No placeholder branding is invented; with no file present, nothing is
   declared.
 
+- **`thrift_compress.py` + `tools/measure_compaction.py`** (#11) — token-thrift's
+  text transform, vendored stdlib-only (no new runtime dependency), behind
+  `AGENT_MEM_THRIFT_COMPACT` which defaults **OFF**. Compaction digests are not
+  compressed until it is switched on.
+
+  Measured, not estimated: **4.9%** over 17 real board units (`o200k_base`,
+  fidelity gate 17/17). Far below the −17.8% simulation, and that is the
+  fidelity fix working rather than the compressor underperforming — entry titles
+  are now kept verbatim, so only decision bodies and warning lines remain
+  compressible. A smaller honest number replaced a larger unsafe one.
+
+  The harness carries `--self-test`, which asserts the fidelity gate goes **red**
+  on a rewritten title, a rewritten heading, a dropped ticket id and an altered
+  number. It exists because the original `fidelity()` scored 1.0 on live title
+  corruption: a gate that cannot fail on its own requirement is decorative.
+
 ### Fixed
+
+- **CI actually runs the offline suites.** The step was `pytest tests`, and the
+  offline suites live at the repo root, so the role gate (18 tests) and the wait
+  primitive (29 tests) — the two things v4 is about — had never run in CI. Now
+  enumerated explicitly; `test_a2a_live.py` and `test_a2a_multiprocess.py` stay
+  out because they need a live board. 116 tests now run.
 
 - **Submitting no longer hands off an agent that owes a review** (#13). If the
   submitter owns another ticket already sitting in `submitted`, leaving strands
