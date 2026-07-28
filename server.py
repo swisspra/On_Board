@@ -412,6 +412,31 @@ def _finalize_memory_entry(entry: dict, pinned_summary: Optional[str] = None) ->
         entry["pinned_summary"] = _pinned_summary(entry.get("title", ""), entry.get("content", ""), pinned_summary)
     return entry
 
+def _unpin_memory_entry(entry: dict, actor: str, reason: Optional[str] = None) -> None:
+    """Demote a memory in-place while retaining its audit record."""
+    entry["pinned"] = False
+    entry.pop("pinned_summary", None)
+    entry["priority"] = 1
+    entry["unpinned_by"] = actor
+    entry["unpinned_at"] = _now()
+    if reason:
+        entry["unpin_reason"] = reason
+
+def _demote_rejection_warnings(mem: list, ticket_id: str, resolution: str, actor: str) -> bool:
+    """Demote only structured, auto-generated rejection warnings for a ticket."""
+    changed = False
+    prefix = f"[RESOLVED:{resolution}]"
+    for entry in mem:
+        if not entry.get("pinned") or "auto-rejection" not in entry.get("tags", []):
+            continue
+        if ticket_id not in entry.get("related_tickets", []):
+            continue
+        _unpin_memory_entry(entry, actor, f"ticket {ticket_id} reached {resolution}")
+        if not str(entry.get("title", "")).startswith(prefix):
+            entry["title"] = f"{prefix} {entry.get('title', '')}"
+        changed = True
+    return changed
+
 def _minutes_ago(ts: object) -> str:
     try:
         return f"{max(0, int((time.time() - float(ts)) // 60))}m"
@@ -1287,13 +1312,7 @@ async def memory_unpin(params: MemoryUnpinInput) -> str:
     target = next((m for m in mem if m.get("id") == params.memory_id), None)
     if target is None:
         return f"❌ Memory `{params.memory_id}` not found. No changes made."
-    target["pinned"] = False
-    target.pop("pinned_summary", None)
-    target["priority"] = 1
-    target["unpinned_by"] = params.agent_name
-    target["unpinned_at"] = _now()
-    if params.reason:
-        target["unpin_reason"] = params.reason
+    _unpin_memory_entry(target, params.agent_name, params.reason)
     _save_mem(mem)
     return f"🔓 Unpinned `{target['id']}` — **{target.get('title', 'Untitled')}**; entry retained."
 
@@ -2848,6 +2867,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
 
                 # Log as memory
                 mem = _load_mem()
+                _demote_rejection_warnings(mem, t["id"], "closed", params.agent_name)
                 mem.append({
                     "id": _id(), "agent_name": params.agent_name,
                     "memory_type": MemoryType.PROGRESS,
@@ -2917,7 +2937,8 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     "memory_type": MemoryType.WARNING,
                     "title": f"❌ Rejected {t['id']}: {t['title']}",
                     "content": f"Rejected work by `{t.get('claimed_by','?')}`. {params.review_notes[:200]}\nFix: {(params.fix_instructions or 'See rejection note')[:200]}",
-                    "tags": ["ticket","rejected"], "related_files": [],
+                    "tags": ["ticket", "rejected", "auto-rejection"], "related_files": [],
+                    "related_tickets": [t["id"]],
                     "priority": 2, "pinned": True, "created_at": _now(), "timestamp": time.time()
                 }))
                 _save_mem(mem)
@@ -2954,6 +2975,9 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
             if reason:
                 t["cancel_reason"] = reason
             _save_ticket_index(idx)
+            mem = _load_mem()
+            if _demote_rejection_warnings(mem, t["id"], "canceled", agent_name):
+                _save_mem(mem)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."
@@ -2981,6 +3005,9 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
             if reason:
                 t["terminate_reason"] = reason
             _save_ticket_index(idx)
+            mem = _load_mem()
+            if _demote_rejection_warnings(mem, t["id"], "terminated", agent_name):
+                _save_mem(mem)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."

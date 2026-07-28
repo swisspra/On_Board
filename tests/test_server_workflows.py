@@ -817,3 +817,57 @@ def test_reviewer_stays_active_after_approve_and_reject(tmp_path):
     assert "Rejected" in reject
     assert "still on board" in reject
     assert server._load_agt()["reviewer"]["status"] == "active"
+
+
+def test_rejection_warning_demotes_on_approve_but_manual_warning_survives(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "test project", "tech_stack": "python"})
+    now = time.time()
+    server._save_agt({"reviewer": {
+        "agent_name": "codex-reviewer", "agent_platform": "codex",
+        "agent_role": "reviewer", "status": "active", "last_activity": now,
+    }})
+    server._tickets_dir()
+    ticket = {
+        "id": "TK-resolve", "title": "Resolve warning", "description": "d",
+        "target_url": "local", "scope": "READ-ONLY", "required_fields": ["result"],
+        "priority": "medium", "status": "submitted", "created_by": "planner",
+        "assigned_to": None, "claimed_by": "worker", "created_at": "2026-05-08T12:01:00",
+        "updated_at": "2026-05-08T12:01:00", "timestamp": now,
+    }
+    server._save_ticket_index([ticket])
+    server._save_mem([{
+        "id": "manual", "agent_name": "codex-main", "memory_type": "warning",
+        "title": "Manual warning about TK-resolve", "content": "Keep this warning.",
+        "tags": ["ticket", "warning"], "related_tickets": ["TK-resolve"],
+        "priority": 3, "pinned": True, "pinned_summary": "Manual warning.",
+    }])
+
+    reject = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer", ticket_id="TK-resolve", verdict="reject",
+        review_notes="needs evidence", fix_instructions="add proof")))
+    assert "Rejected" in reject
+    rejected_warning = next(m for m in server._load_mem() if "Rejected TK-resolve" in m["title"])
+    assert rejected_warning["pinned"] is True
+    assert rejected_warning["related_tickets"] == ["TK-resolve"]
+    assert "auto-rejection" in rejected_warning["tags"]
+
+    reopened = server._load_ticket_index()[0]
+    reopened["status"] = "submitted"
+    server._save_ticket_index([reopened])
+    approve = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-reviewer", ticket_id="TK-resolve", verdict="approve",
+        review_notes="evidence added")))
+    assert "Approved" in approve
+
+    memories = server._load_mem()
+    rejected_warning = next(m for m in memories if "Rejected TK-resolve" in m["title"])
+    manual = next(m for m in memories if m["id"] == "manual")
+    assert rejected_warning["pinned"] is False
+    assert rejected_warning["priority"] == 1
+    assert rejected_warning["title"].startswith("[RESOLVED:closed] ")
+    assert rejected_warning["title"].count("[RESOLVED:closed]") == 1
+    assert manual["pinned"] is True
+
+    server._demote_rejection_warnings(memories, "TK-resolve", "closed", "codex-reviewer")
+    assert next(m for m in memories if "Rejected TK-resolve" in m["title"])["title"].count("[RESOLVED:closed]") == 1
