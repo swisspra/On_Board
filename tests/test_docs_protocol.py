@@ -121,14 +121,25 @@ def test_public_source_repo_has_no_generated_project_files():
 
 
 def test_release_materials_match_current_version():
+    """Version lives in pyproject; everything else must agree with it.
+
+    Previously this pinned '4.0.0' as a literal in two places, so every release
+    had to hand-edit the test that was supposed to be guarding the release. Read
+    the version instead: drift between pyproject and the changelog now fails
+    without anyone having to remember to update this file.
+    """
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     first_header = next(line for line in changelog.splitlines() if line.startswith("## v"))
     release_notes = (REPO_ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
 
-    assert re.search(r'^version = "4\.0\.0"$', pyproject, re.MULTILINE)
-    assert first_header.startswith("## v4.0.0")
-    assert "Agent-to-Agent" in first_header
+    version_match = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"$', pyproject, re.MULTILINE)
+    assert version_match, "pyproject.toml has no parseable version"
+    version = version_match.group(1)
+
+    assert first_header.startswith(f"## v{version}"), (
+        f"changelog leads with {first_header!r}, pyproject says {version}")
+    assert f"v{version}" in release_notes, f"RELEASE_NOTES.md does not mention v{version}"
     for expected in ["memory_wait_for_event", "stay_active", "allow_self_review", "reject -> fix -> resubmit", "migration guide", "SELF-REVIEWED"]:
         assert expected in release_notes
 
