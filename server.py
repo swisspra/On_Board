@@ -31,6 +31,7 @@ from mcp.server.fastmcp import FastMCP
 
 import a2a_wait
 import ticket_roles
+from thrift_compress import compress_digest as _thrift_compress_digest
 
 # ── Config — PROJECT LOCAL ──────────────────────────────
 PROJECT_ROOT = Path(os.environ.get(
@@ -46,6 +47,9 @@ MEMORY_DIR = PROJECT_ROOT / ".agent-mem"
 # COLD: raw archive on disk, never loaded unless searched
 HOT_WINDOW_HOURS = int(os.environ.get("AGENT_MEM_HOT_HOURS", "24"))
 MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
+THRIFT_COMPACT_ENABLED = os.environ.get("AGENT_MEM_THRIFT_COMPACT", "1").lower() not in {
+    "0", "false", "off", "no"
+}
 VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()
 
 # ── Multi-Agent Concurrency Config ──────────────────────
@@ -1839,6 +1843,8 @@ async def memory_compact(params: CompactInput) -> str:
 
     for agent_name, entries in by_agent.items():
         summary = _rule_based_compress(entries)
+        if THRIFT_COMPACT_ENABLED:
+            summary = _thrift_compress_digest(summary)
 
         ts_range = ""
         timestamps = [e.get("created_at", "") for e in entries]
