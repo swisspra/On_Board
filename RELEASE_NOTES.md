@@ -19,6 +19,16 @@ Desktop instances and a Codex agent, not by reading it.
 - Ticket `.md` files no longer report `TicketStatus.SUBMITTED` forever, and the
   server declares its own `website_url` so clients stop borrowing a stranger's
   branding.
+- **Thrift compaction, vendored and measured** — stdlib-only, no new runtime
+  dependency, and gated behind `AGENT_MEM_THRIFT_COMPACT` which defaults **OFF**.
+  Measured **4.9%** over 17 real board units, fidelity gate 17/17. Far below the
+  −17.8% simulation because entry titles are kept verbatim now — a smaller
+  honest number replacing a larger unsafe one. The harness ships `--self-test`,
+  which proves the gate can go red; the metric it replaces scored 1.0 on live
+  title corruption.
+- **CI now runs the offline suites.** The step was `pytest tests`, and those
+  suites live at the repo root, so the role gate and the wait primitive — the two
+  things v4 is about — had never run in CI since v4.0.0. 116 tests run now.
 
 Full detail in [CHANGELOG.md](./CHANGELOG.md).
 
