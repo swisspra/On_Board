@@ -31,7 +31,19 @@ jobs:
         run: uv sync --extra test
 
       - name: Run tests
-        run: uv run python -m pytest tests -q
+        # The offline suites live at the repo root, not under tests/, so a bare
+        # `pytest tests` silently skipped all of them -- including the role gate
+        # and the wait primitive, which are the two things v4 is actually about.
+        # Enumerated rather than using `pytest .` because test_a2a_live.py and
+        # test_a2a_multiprocess.py need a live board and do not belong in CI.
+        run: >
+          uv run python -m pytest tests
+          test_a2a_wait_offline.py
+          test_ticket_roles_offline.py
+          test_snapshot_gate_offline.py
+          test_idle_budget_offline.py
+          test_thrift_compress.py
+          -q
 
       - name: Compile Python files
         run: uv run python -m py_compile server.py dashboard_live.py

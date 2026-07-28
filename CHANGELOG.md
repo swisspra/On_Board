@@ -1,5 +1,217 @@
 # Changelog
 
+## v4.0.1
+
+Patch release. Everything here is polish and correction on top of v4.0.0,
+found by actually running v4 between two Claude Desktop instances and a Codex
+agent rather than by reading it.
+
+Note on the number: `memory_unpin` is a new tool and `retracts=` /
+`idle_budget_min` are new fields, which a strict reading of semver would call a
+minor. Shipped as a patch deliberately, because v4.0.0 had no production
+consumers yet and all of it is repair of that release.
+
+### Added
+
+- **Idle budget with STAND-DOWN** (#10). `memory_wait_for_event` takes
+  `idle_budget_min` (minutes, default 15; `0` listens indefinitely) and the
+  server counts consecutive empty parks in the agent's watch cursor. When the
+  budget is spent it answers `STAND-DOWN` instead of another idle, so an
+  unattended listener stops on its own rather than looking wedged to whoever is
+  watching. Every idle reply prints its countdown: `idle 3/5 — ~6 min to
+  stand-down`.
+
+  Budgets are stated in **minutes** because a human watching a silent loop is
+  counting wall clock, not iterations — a compliant agent looping for 20
+  minutes looks stuck even when it is exactly on budget. `STAND_DOWN` is a
+  status distinct from `IDLE`, so a loop matching on `idle` to decide whether
+  to re-arm cannot read a stand-down as permission to continue. The counter
+  advances only on a completed empty park and resets only on a real event —
+  never on re-arming, or a tight re-arm loop would reset its own patience and
+  never stand down.
+
+  The `listen` prompt previously said *"Keep going; there is no round budget"*,
+  which would have talked an agent straight past its own stand-down; it now
+  defers to the server.
+
+  **No migration needed** — cursor files written before this carry no
+  `idle_count` and read as zero.
+
+- **`memory_unpin`** (#16) — demotes a pinned memory without deleting it.
+  `priority=3` means *never compact this*, not *important*: an auto-pinned entry
+  is exempt from compaction forever and competes for the 5 onboarding slots, and
+  until now there was no way to undo one. A board accumulated pinned rejection
+  warnings for tickets that had long since closed, and a warning later found to
+  be **wrong** stayed pinned at critical, so every joining agent read a bug that
+  did not exist as the first thing on the board. Clears `pinned` and
+  `pinned_summary`, drops priority to 1, records `unpinned_by` / `unpinned_at` /
+  `unpin_reason`. The entry stays in `memories.json`.
+
+- **`retracts=` on `memory_write`** (#16) — a correction demotes what it
+  corrects, in one call. The target gains a `[RETRACTED]` prefix and a
+  `retracted_by` back-link; the new entry gets a `retracts` forward-link. A
+  bogus target id is refused *before* the new entry is appended, so a failed
+  retraction leaves nothing behind.
+
+- **Rejection warnings auto-demote on terminal states** (#16) — retitled
+  `[RESOLVED:closed|canceled|terminated]` once their ticket resolves, wired at
+  all three sites. Discrimination is by the `auto-rejection` tag plus
+  `related_tickets`, never by title string, so a human's hand-written warning
+  about the same ticket is left alone. **Forward-only: existing pinned rejection
+  warnings are not backfilled** — clear them with `memory_unpin`.
+
+- **The server declares its own identity** (#13) — `website_url`, plus an icon
+  as a `data:` URI when `docs/assets/on-board-icon.png` exists. A client that
+  cannot resolve a server's identity substitutes whatever it has cached: Codex
+  rendered On Board under the name and logo of an unrelated shopping connector.
+  No placeholder branding is invented; with no file present, nothing is
+  declared.
+
+- **`thrift_compress.py` + `tools/measure_compaction.py`** (#11) — token-thrift's
+  text transform, vendored stdlib-only (no new runtime dependency), behind
+  `AGENT_MEM_THRIFT_COMPACT` which defaults **OFF**. Compaction digests are not
+  compressed until it is switched on.
+
+  Measured, not estimated: **4.9%** over 17 real board units (`o200k_base`,
+  fidelity gate 17/17). Far below the −17.8% simulation, and that is the
+  fidelity fix working rather than the compressor underperforming — entry titles
+  are now kept verbatim, so only decision bodies and warning lines remain
+  compressible. A smaller honest number replaced a larger unsafe one.
+
+  The harness carries `--self-test`, which asserts the fidelity gate goes **red**
+  on a rewritten title, a rewritten heading, a dropped ticket id and an altered
+  number. It exists because the original `fidelity()` scored 1.0 on live title
+  corruption: a gate that cannot fail on its own requirement is decorative.
+
+### Fixed
+
+- **CI actually runs the offline suites.** The step was `pytest tests`, and the
+  offline suites live at the repo root, so the role gate (18 tests) and the wait
+  primitive (29 tests) — the two things v4 is about — had never run in CI. Now
+  enumerated explicitly; `test_a2a_live.py` and `test_a2a_multiprocess.py` stay
+  out because they need a live board. 116 tests now run.
+
+- **Submitting no longer hands off an agent that owes a review** (#13). If the
+  submitter owns another ticket already sitting in `submitted`, leaving strands
+  it — observed live: an agent submitted its own ticket, auto-handed off, and
+  its peer's submission sat unreviewed with nobody on board to adjudicate. The
+  reply now names the ticket that is owed. Narrow by design: with nothing owed,
+  the previous behaviour stands.
+
+- **The self-review denial no longer tells a solo owner to ask itself** (#13).
+  The message reports `created_by`, which was always correct — but on a solo
+  `create → claim → do` cycle that is the same agent, so a correct lookup
+  produced a useless sentence. It now names the role in that case.
+
+- **Ticket `.md` files no longer carry `TicketStatus.SUBMITTED` forever** (#13).
+  Two bugs in one line: f-string formatting of a `str`-mixin Enum yields the
+  repr on Python 3.11+, and the file was written at submit and never rewritten,
+  so closed tickets still read `submitted`. `_index.json` remains the source of
+  truth, but a human diagnosing a problem reads the `.md` — a stale one is how a
+  reviewer here concluded a rejection had been silently reverted when the ticket
+  had simply been re-submitted.
+
+### Changed
+
+- **Board snapshots are mtime-gated** (#12). `_board_snapshot` re-parsed
+  `memories.json` and the ticket index on every 2 s poll tick, per parked
+  listener. It now keys on `(st_mtime_ns, st_size)` of both source files and
+  reuses the cached snapshot while neither has moved — the common case while
+  parked. 25 ticks cost one parse instead of 25. The cached dict is returned by
+  identity under a documented read-only contract.
+
+## v4.0.0 — Agent-to-Agent (A2A): the listening half of On Board
+
+**Major.** Until now the board was pull-only: an agent learned that a peer
+created a ticket or left a handoff only when a human told it to look.
+v4 adds a blocking wait primitive so agents wake each other through the
+board — verified live between two Claude Desktop instances and one Codex
+(GPT) agent, including a full reject → fix → resubmit cycle closed with
+zero human relay and a reviewer-reproduced sha256.
+
+### ⚠️ BREAKING CHANGES
+
+1. **An executor can no longer adjudicate its own work** (`ticket_roles.py`).
+   Submitting requires having claimed the ticket; reviewing/closing requires
+   being the ticket's creator or holding a `main`/`lead`/`reviewer` role, and
+   is denied to whoever executed it. *Solo workflows* (create → claim →
+   review your own ticket) now require `allow_self_review=True` on
+   `memory_review_ticket`, which permanently stamps the ticket
+   `SELF-REVIEWED — no independent check`.
+2. **Assigned tickets are not claimable by other agents** (coordinators may
+   override). Previously assignment was advisory.
+3. **A bystander can no longer submit a ticket someone else claimed.**
+
+### Migration guide (existing `.agent-mem/` boards)
+
+- **No data migration needed.** Old tickets, memories, digests and
+  checkpoints load unchanged. Tickets written before the per-transition
+  stamps existed are attributed by a documented fallback heuristic
+  (covered by tests).
+- **Legacy wait cursors carry over**: a pre-v4 shared `watch.json` is read
+  once per agent, then superseded by per-agent `watch-<agent>.json`
+  (regression-tested: no replay storm on upgrade).
+- **Solo boards**: audit your habits — if you create, claim and review your
+  own tickets (grep for `created_by == claimed_by`), add
+  `allow_self_review=True` at review time or onboard a second identity as
+  reviewer.
+- **Windows**: `fcntl` is unavailable; the board lock degrades to pre-v4
+  last-write-wins semantics instead of failing to start. Single-instance
+  Windows use is unaffected; multi-instance Windows boards keep the old
+  concurrency risk.
+- New runtime files under `.agent-mem/`: `watch-<agent>.json`, `.board.lock`,
+  and per-process `*.tmp.<pid>` during saves — all inside the already
+  gitignored directory. Entry points, tool names and existing tool
+  signatures are unchanged; new parameters (`stay_active`,
+  `allow_self_review`) default to previous behaviour.
+
+### Added
+- Board style (token-thrift for A2A) — board entries are agent-to-agent
+  payloads first, human-inspectable second. Machine-read fields (memory
+  content, ticket descriptions, submit summaries, review verdicts, digests)
+  are now instructed — via the onboarding prompt, the `listen` prompt, field
+  descriptions, and the compaction workflow — to be written in compressed
+  English with code/paths/IDs verbatim; human-skim fields (titles, pinned
+  summaries) stay readable in any language. Rationale: Thai measures 2.96×
+  English tokens for identical content, and on a board one hop's output is
+  the next hop's input, so the language rule compounds across every wake.
+- `memory_wait_for_event` — park in one tool call until a peer creates a
+  ticket, changes a status, or assigns work. Checks before blocking (a re-arm
+  after a gap drains its backlog in 0s), one wake returns the whole queue,
+  and an agent never wakes on its own actions (attribution read from
+  per-transition stamps: `claimed_by`, `submitted_by`, `reviewed_by`, …).
+- `listen` MCP prompt — the cheap re-arm loop, with measured guidance:
+  Claude Desktop cancels at ~240s **per call, not per turn**, so keep
+  `timeout_s ≤ 180` and re-arm freely; stdio clients may pass `long_wait`.
+- Role × ownership gate (`ticket_roles.py`) — *completed ≠ success*: the
+  executor's terminal move is `submitted`; only the owner or a
+  main/lead/reviewer closes. Holds even when owner == executor;
+  `allow_self_review=True` is the explicit escape and stamps the ticket
+  SELF-REVIEWED. Assigned tickets are not claimable by others.
+- `stay_active` on `memory_submit_ticket` — listeners stay on board to catch
+  the verdict and take the rejected → retry path.
+- Review verdicts travel: `review_notes` / `fix_instructions` are stamped on
+  the ticket and carried on the wake event, so a rejected worker knows *why*
+  without a human relaying it. Rejections render as `REJECTED → open` via the
+  durable `rejection_count` delta (the transient `rejected` state is never
+  observable to a poller).
+- Cross-process board lock — `tickets/_index.json` mutations (and
+  `memory_agent_join`) hold an advisory flock, so simultaneous create/claim
+  from separate server processes no longer lose writes.
+- Per-process tmp names in `JsonMemoryStore.save` — concurrent saves from two
+  instances previously interleaved into one fixed `.tmp` path and corrupted it
+  (reproduced by the new multiprocess stress test).
+- Per-agent wait cursors (`watch-<agent>.json`) — single writer per file.
+- Test suites: 21 offline wait, 16 role rules, 22 live integration (full
+  reject → retry → approve cycle), multiprocess contention stress; origin's
+  39 workflow tests unchanged and passing (98 + stress total).
+
+### Notes
+- Local stdio servers cross Desktop instances; OAuth/AD connectors do not —
+  one session binds to one instance. The intended topology is asymmetric:
+  one instance holds enterprise connectors and fetches, the other does local
+  work, the board is the only channel between them.
+
 ## v3.7.1 — Safer Setup, Compact Onboarding, MCP SDK Security (2026-07-21)
 
 **Current GitHub Release collecting all major changes after v3.5.2, plus a security patch for the open Dependabot MCP Python SDK alerts.**

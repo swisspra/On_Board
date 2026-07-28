@@ -1,54 +1,62 @@
-# v3.7.1 — Safer Setup, Compact Onboarding, MCP SDK Security
+# v4.0.1 — the polish v4.0.0 needed
 
-This release collects the major On Board changes after v3.5.2 into one current
-GitHub Release, plus a security dependency update for the MCP Python SDK.
+Patch release. Everything in it was found by *running* v4 between two Claude
+Desktop instances and a Codex agent, not by reading it.
 
-## Highlights
+- **`memory_unpin`** and **`retracts=`** — `priority=3` means *never compact
+  this*, not *important*, and until now there was no way to undo one. A warning
+  later found to be wrong stayed pinned at critical, so every joining agent read
+  a bug that did not exist as the first thing on the board.
+- **Rejection warnings auto-demote** once their ticket closes, cancels or is
+  terminated. A human's hand-written warning about the same ticket is left alone.
+  Forward-only: existing pinned warnings are not backfilled — use `memory_unpin`.
+- **Idle budget with STAND-DOWN** — a parked listener now stops on its own after
+  `idle_budget_min` (default 15) instead of re-arming forever and looking wedged.
+- **Board snapshots are mtime-gated** — 25 poll ticks cost one JSON parse instead
+  of 25.
+- **Submitting no longer hands off an agent that owes a review**, which used to
+  strand a peer's submission with nobody on board to adjudicate it.
+- Ticket `.md` files no longer report `TicketStatus.SUBMITTED` forever, and the
+  server declares its own `website_url` so clients stop borrowing a stranger's
+  branding.
+- **Thrift compaction, vendored and measured** — stdlib-only, no new runtime
+  dependency, and gated behind `AGENT_MEM_THRIFT_COMPACT` which defaults **OFF**.
+  Measured **4.9%** over 17 real board units, fidelity gate 17/17. Far below the
+  −17.8% simulation because entry titles are kept verbatim now — a smaller
+  honest number replacing a larger unsafe one. The harness ships `--self-test`,
+  which proves the gate can go red; the metric it replaces scored 1.0 on live
+  title corruption.
+- **CI now runs the offline suites.** The step was `pytest tests`, and those
+  suites live at the repo root, so the role gate and the wait primitive — the two
+  things v4 is about — had never run in CI since v4.0.0. 116 tests run now.
 
-- Safer central-install workflow: one On Board checkout can serve multiple projects with separate project memory.
-- Linked-project registry: `setup-project.sh`, `doctor.sh`, and `update.sh` can list or refresh known linked projects.
-- Safer project refresh: `update.sh --refresh-linked` preserves registered hook mode and backs up overwritten generated files.
-- Runtime launcher update: generated MCP config now uses `python3 onboard_server.py`, which normally runs `.venv/bin/python server.py` and only rebuilds `.venv` if missing.
-- Compact onboarding: `memory_onboard` now returns current working context instead of full briefing and full ticket detail.
-- Better agent routing: onboarding points agents to `memory_get_briefing`, `memory_list_tickets`, `memory_read`, `memory_search`, `memory_links`, `memory_doctor`, `memory_status`, and `memory_token_usage` for details.
-- Critical memory cleanup: `memory_write(priority=3)` auto-pins important entries with a compact `pinned_summary` while preserving raw content.
-- System-generated handoffs, checkpoints, ticket submit handoffs, and rejection warnings now also get `pinned_summary`.
-- Hook behavior is safer by default: startup hooks return a small read-only briefing; legacy stop/end-turn hooks no longer write memory.
-- Agent roles and ticket controls were expanded for parallel main, worker, tester, reviewer, and sub-agent flows.
-- Removed the rarely used `memory_pin` public tool. Use `memory_write(priority=3, pinned_summary=...)` for critical memory.
-- Public MCP tool surface is now 28 tools.
-- Updated locked `mcp` dependency from `1.27.1` to `1.28.1`, covering the open high-severity Dependabot alerts for the MCP Python SDK lockfile entry.
+Full detail in [CHANGELOG.md](./CHANGELOG.md).
 
-## Notes
+---
 
-- This release is compatible with existing `.agent-mem` project memory.
-- Existing linked projects can use `bash update.sh --refresh-linked` to update the central checkout and refresh generated project files in one run.
-- Restart MCP clients after updating so they reload generated config and hooks.
+# v4.0.0 — Agent-to-Agent: the listening half of On Board
 
-## Upgrade
+The board is no longer pull-only. `memory_wait_for_event` lets an agent park
+inside one tool call and wake when a peer creates a ticket, changes a status,
+or assigns work — verified live across Claude Desktop x Claude Desktop and
+Claude x Codex (GPT), including a full reject -> fix -> resubmit cycle closed
+with zero human relay.
 
-Update this On Board checkout only:
+Highlights:
 
-```bash
-bash update.sh
-bash doctor.sh --self
-```
+- `memory_wait_for_event` + `listen` prompt: check-before-block, one wake
+  drains the queue, agents never wake on their own actions.
+- Role gate (*completed != success*): the executor's terminal move is
+  `submitted`; only the owner or a main/lead/reviewer closes. Solo use stays
+  possible via explicit `allow_self_review=True`, permanently stamped
+  SELF-REVIEWED in the audit.
+- Review verdicts travel: `review_notes` and `fix_instructions` ride the wake
+  payload, so a rejected worker can retry without a human relaying anything.
+- `stay_active=true` on submit keeps a listener on board to catch the verdict.
+- Concurrency hardening for simultaneous writers: advisory board lock on
+  ticket mutations and per-process tmp files in the JSON store.
+- Board style guidance (token-thrift) on machine-read fields; measured
+  -17.8% tokens on a real 17-unit corpus, fidelity-gated.
 
-Update this checkout and refresh every registered linked project:
-
-```bash
-bash update.sh --refresh-linked
-bash doctor.sh --all-linked
-```
-
-`--refresh-linked` also performs the normal update first. It preserves each
-project's registered hook mode. Restart your MCP clients after updating.
-
-If you are upgrading from v3.5.2 or older, refresh project setup after the
-central update so generated `.onboard/` config, rules, hooks, and dashboard
-launchers are current:
-
-```bash
-bash setup-project.sh /path/to/your/project
-bash doctor.sh /path/to/your/project
-```
+Breaking changes and the migration guide (existing `.agent-mem/` boards load
+unchanged; legacy wait cursors carry over) are in CHANGELOG.md.

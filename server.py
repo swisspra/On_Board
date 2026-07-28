@@ -15,7 +15,12 @@ Design principles:
 Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
-import json, os, time, hashlib, math, re
+import json, os, time, hashlib, math, re, base64
+import asyncio, functools
+try:
+    import fcntl                      # POSIX only
+except ImportError:                   # Windows: no fcntl; degrade gracefully
+    fcntl = None
 from datetime import datetime
 from typing import Optional, List
 from enum import Enum
@@ -23,6 +28,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, ConfigDict
 from mcp.server.fastmcp import FastMCP
+
+import a2a_wait
+import ticket_roles
+from thrift_compress import compress_digest as _thrift_compress_digest
 
 # ── Config — PROJECT LOCAL ──────────────────────────────
 PROJECT_ROOT = Path(os.environ.get(
@@ -38,6 +47,9 @@ MEMORY_DIR = PROJECT_ROOT / ".agent-mem"
 # COLD: raw archive on disk, never loaded unless searched
 HOT_WINDOW_HOURS = int(os.environ.get("AGENT_MEM_HOT_HOURS", "24"))
 MAX_HOT_ENTRIES = int(os.environ.get("AGENT_MEM_MAX_HOT", "50"))
+THRIFT_COMPACT_ENABLED = os.environ.get("AGENT_MEM_THRIFT_COMPACT", "0").lower() not in {
+    "0", "false", "off", "no"
+}
 VECTOR_BACKEND = os.environ.get("AGENT_MEM_VECTOR_BACKEND", "none").lower()
 
 # ── Multi-Agent Concurrency Config ──────────────────────
@@ -98,7 +110,41 @@ def _recent_agent_items(agents: dict, limit: int = AGENT_HISTORY_LIMIT) -> list:
     return sorted(agents.items(), key=lambda item: _agent_activity_ts(item[1]), reverse=True)[:limit]
 
 # ── MCP Server ──────────────────────────────────────────
-mcp = FastMCP("onboard_memory_mcp")
+_HOMEPAGE = "https://github.com/swisspra/On_Board"
+_ICON_PATH = Path(__file__).resolve().parent / "docs" / "assets" / "on-board-icon.png"
+
+
+def _server_icons():
+    """Declare a server icon if one is shipped with the source, else declare none.
+
+    A client that cannot resolve a server's identity falls back to whatever it
+    can find: Codex rendered On Board under the name and logo of an unrelated
+    shopping connector it had cached from its app directory. Declaring identity
+    is the only way to stop that from our side.
+
+    A data: URI is used deliberately — this is a local stdio server, so a remote
+    icon fetch would be pointless and would leak a request per client start.
+
+    No placeholder is invented. If the asset is absent we declare nothing, which
+    is honest; dropping a real 128x128 PNG at the path above is the only step
+    needed later. Note the installed SDK's Icon has no `theme` field, so one
+    file must read on both light and dark backgrounds.
+    """
+    try:
+        from mcp.types import Icon
+    except ImportError:
+        return None
+    if not _ICON_PATH.is_file():
+        return None
+    try:
+        payload = base64.b64encode(_ICON_PATH.read_bytes()).decode("ascii")
+    except OSError:
+        return None
+    return [Icon(src=f"data:image/png;base64,{payload}",
+                 mimeType="image/png", sizes=["128x128"])]
+
+
+mcp = FastMCP("onboard_memory_mcp", website_url=_HOMEPAGE, icons=_server_icons())
 
 # ── Enums ───────────────────────────────────────────────
 class MemoryType(str, Enum):
@@ -181,7 +227,11 @@ class JsonMemoryStore:
     def save(self, fp: Path, data):
         self.ensure()
         fp.parent.mkdir(parents=True, exist_ok=True)
-        tmp = fp.with_suffix(".tmp")
+        # tmp name must be unique PER PROCESS: with A2A every Desktop/Codex
+        # instance runs its own server, and two concurrent saves to the same
+        # fixed .tmp path interleave into one file and corrupt it (reproduced
+        # by test_a2a_multiprocess.py on agents.json). rename() stays atomic.
+        tmp = fp.with_suffix(f".tmp.{os.getpid()}")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=str)
         tmp.rename(fp)
@@ -190,6 +240,45 @@ class JsonMemoryStore:
         return self.memory_dir / name
 
 STORE = JsonMemoryStore(PROJECT_ROOT)
+
+
+# ── Board lock — serializes ticket-index mutations ──────
+# tickets/index.json is one file read-modify-written by EVERY ticket tool, and
+# each Desktop/Codex instance runs its own server process. Before A2A, two
+# agents rarely wrote at the same moment; memory_wait_for_event makes
+# simultaneous action the normal case (both wake off the same event), so a
+# create colliding with a claim silently drops one of them. An advisory flock
+# held for the whole mutating tool call makes each RMW atomic across
+# processes. Contention is a few ms (local disk, short tools), so blocking is
+# acceptable; the acquire runs in a thread to keep the event loop free.
+# Deliberately NOT applied to memory_wait_for_event (read-only, parks for
+# minutes). agents.json heartbeats stay unlocked (last-write-wins is fine),
+# but memory_agent_join IS locked: a lost join drops an agent from the roster.
+
+def _board_lock_path() -> Path:
+    STORE.ensure()
+    return STORE.memory_dir / ".board.lock"
+
+def _with_board_lock(fn):
+    @functools.wraps(fn)
+    async def _locked(*args, **kwargs):
+        if fcntl is None:
+            # Windows: no flock. Behaviour degrades to pre-lock semantics
+            # (last-write-wins on simultaneous ticket mutations) instead of
+            # crashing the whole server on import. Single-instance use is
+            # unaffected; multi-instance Windows boards keep the old risk.
+            return await fn(*args, **kwargs)
+        fd = os.open(_board_lock_path(), os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
+            return await fn(*args, **kwargs)
+        finally:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
+    return _locked
+
 
 def _ensure():
     STORE.ensure()
@@ -326,6 +415,7 @@ def _on_board_protocol_xml() -> str:
         "  <write_policy>Write after meaningful actions only.</write_policy>",
         "  <ticket_policy>Ticket mutations require an onboarded agent session.</ticket_policy>",
         "  <handoff_policy>Always handoff before leaving.</handoff_policy>",
+        "  <a2a_policy>To wait for peers, park in memory_wait_for_event and re-arm after every return. Submit with stay_active=true when you need the verdict. Never review your own executed work without allow_self_review.</a2a_policy>",
         "</on_board_protocol>",
     ])
 
@@ -359,6 +449,42 @@ def _finalize_memory_entry(entry: dict, pinned_summary: Optional[str] = None) ->
     if entry.get("pinned") and not entry.get("pinned_summary"):
         entry["pinned_summary"] = _pinned_summary(entry.get("title", ""), entry.get("content", ""), pinned_summary)
     return entry
+
+def _unpin_memory_entry(entry: dict, actor: str, reason: Optional[str] = None) -> None:
+    """Demote a memory in-place while retaining its audit record."""
+    entry["pinned"] = False
+    entry.pop("pinned_summary", None)
+    entry["priority"] = 1
+    entry["unpinned_by"] = actor
+    entry["unpinned_at"] = _now()
+    if reason:
+        entry["unpin_reason"] = reason
+
+def _demote_rejection_warnings(mem: list, ticket_id: str, resolution: str, actor: str) -> bool:
+    """Demote only structured, auto-generated rejection warnings for a ticket.
+
+    Keyed on the 'auto-rejection' tag plus related_tickets, never on the title
+    string: a human's hand-written warning about the same ticket is not the
+    board's to demote, and title matching cannot tell the two apart.
+
+    FORWARD-ONLY BY DESIGN, no backfill. Rejection warnings written before the
+    tag existed carry ['ticket', 'rejected'] and no related_tickets, so they are
+    indistinguishable from a human's warning and are left pinned. Clear them
+    with memory_unpin rather than widening this match, which would mean
+    reintroducing exactly the title matching the tag replaced.
+    """
+    changed = False
+    prefix = f"[RESOLVED:{resolution}]"
+    for entry in mem:
+        if not entry.get("pinned") or "auto-rejection" not in entry.get("tags", []):
+            continue
+        if ticket_id not in entry.get("related_tickets", []):
+            continue
+        _unpin_memory_entry(entry, actor, f"ticket {ticket_id} reached {resolution}")
+        if not str(entry.get("title", "")).startswith(prefix):
+            entry["title"] = f"{prefix} {entry.get('title', '')}"
+        changed = True
+    return changed
 
 def _minutes_ago(ts: object) -> str:
     try:
@@ -726,12 +852,19 @@ class MemoryWriteInput(BaseModel):
     agent_name: str = Field(..., description="Your agent name — same name you used in memory_onboard or memory_agent_join. Example: cursor-coder", min_length=1, max_length=100)
     memory_type: MemoryType = Field(..., description="One of: decision, progress, blocker, context, handoff, todo, file_change, discovery, warning, checkpoint")
     title: str = Field(..., description="Short one-line summary of what happened", min_length=1, max_length=200)
-    content: str = Field(..., description="Detailed description — be specific, include file names and reasoning", min_length=1, max_length=10000)
+    content: str = Field(..., description="Detailed description — be specific, include file names and reasoning. Board style: compressed English (agents read this); code/paths/IDs verbatim", min_length=1, max_length=10000)
     tags: Optional[List[str]] = Field(default_factory=list)
     related_files: Optional[List[str]] = Field(default_factory=list)
     related_tickets: Optional[List[str]] = Field(default_factory=list)
-    priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin)")
+    priority: Optional[int] = Field(default=0, ge=0, le=3, description="0=normal 3=critical(auto-pin). 3 means NEVER COMPACT THIS, not merely important — an auto-pinned entry is exempt from compaction forever and competes for the 5 onboarding slots. Use 1-2 for ordinary progress and findings.")
     pinned_summary: Optional[str] = Field(default=None, description="One-line summary for priority=3 pinned memory; raw content is still stored in full", max_length=500)
+    retracts: Optional[str] = Field(default=None, description="Memory ID this entry retracts; target is unpinned and linked both ways")
+
+class MemoryUnpinInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
+    agent_name: str = Field(..., min_length=1, max_length=100)
+    memory_id: str = Field(..., min_length=1, max_length=100)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 class MemoryReadInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -739,6 +872,7 @@ class MemoryReadInput(BaseModel):
     tag: Optional[str] = None
     agent_name: Optional[str] = Field(default=None, description="Filter by who wrote it")
     since_minutes: Optional[int] = Field(default=None, ge=1)
+    pinned_only: bool = Field(default=False, description="Only auto-pinned (priority=3) entries. Use this when onboarding reports that the pinned digest is over budget, so you can see everything competing for the 5 slots and consolidate.")
     limit: Optional[int] = Field(default=50, ge=1, le=500)
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
 
@@ -929,13 +1063,25 @@ def _onboard_ticket_groups(tickets: list, agent_name: str, agent_platform: str, 
 def _ticket_summary_line(ticket: dict) -> str:
     return f"`{ticket.get('id')}` ({ticket.get('status', '?')}): {_compact_line(ticket.get('title', 'Untitled'), 75)}"
 
-def _onboard_pinned(memories: list) -> list[dict]:
-    type_order = {"blocker": 0, "warning": 1, "decision": 2, "checkpoint": 3}
+def _onboard_pinned(memories: list) -> tuple[list[dict], int]:
+    """Top pinned entries for onboarding, plus how many were cut.
+
+    'discovery' used to be missing from type_order, so it scored 9 and always
+    sorted last: on a board with five pinned blockers/warnings/decisions EVERY
+    discovery was invisible. Worse, a retraction is naturally written as a
+    discovery while the false alarm it withdraws is a warning, so a wrong claim
+    structurally outranked its own correction. Discoveries now rank above
+    checkpoints, and the caller is told the hidden count so the digest can
+    never quietly drop knowledge.
+    """
+    type_order = {"blocker": 0, "warning": 1, "decision": 2,
+                  "discovery": 3, "checkpoint": 4}
     pinned = [m for m in memories if m.get("pinned") and m.get("memory_type") != MemoryType.HANDOFF]
-    return sorted(
+    ordered = sorted(
         pinned,
         key=lambda m: (type_order.get(m.get("memory_type"), 9), -m.get("timestamp", 0)),
-    )[:ONBOARD_PINNED_LIMIT]
+    )
+    return ordered[:ONBOARD_PINNED_LIMIT], max(0, len(ordered) - ONBOARD_PINNED_LIMIT)
 
 def _format_compact_onboard(params: OnboardInput, aid: str, rejoined: bool, agents: dict) -> str:
     prj = _load_prj()
@@ -1020,12 +1166,25 @@ def _format_compact_onboard(params: OnboardInput, aid: str, rejoined: bool, agen
             if len(queue_tickets) > ONBOARD_QUEUE_TICKET_LIMIT:
                 lines.append(f"  - ... {len(queue_tickets) - ONBOARD_QUEUE_TICKET_LIMIT} more; call `memory_list_tickets`.")
 
-    pinned = _onboard_pinned(mem)
+    pinned, pinned_hidden = _onboard_pinned(mem)
     lines.extend(["", "## Pinned Critical Memory"])
     if pinned:
         for memory in pinned:
             summary = memory.get("pinned_summary") or _pinned_summary(memory.get("title", ""), memory.get("content", ""))
             lines.append(f"- [{str(memory.get('memory_type', '?')).upper()}] {_compact_line(memory.get('title', ''), 70)}: {_compact_line(summary, 110)}")
+        if pinned_hidden:
+            # Silent truncation is how a board rots: entries stay pinned
+            # forever, priority=3 gets used as "this matters" instead of
+            # "never compact this", and knowledge falls off the bottom unseen.
+            lines.append(
+                f"- \u26a0\ufe0f **{pinned_hidden} more pinned {'entry' if pinned_hidden == 1 else 'entries'} NOT shown**"
+                f" (showing {len(pinned)} of {len(pinned) + pinned_hidden})."
+                " The pinned digest is over budget, so act before starting work:"
+                " call `memory_read(pinned_only=true)` to see them all, fold anything"
+                " still true into ONE consolidated entry, and demote the rest"
+                " (resolved rejections, retracted warnings, superseded checkpoints)."
+                " priority=3 means *never compact this*, not *this is important*."
+            )
     else:
         lines.append("- None.")
 
@@ -1064,6 +1223,7 @@ async def memory_init(params: ProjectInitInput) -> str:
     return f"✅ Initialized at `{MEMORY_DIR}`\n**Project**: {PROJECT_ROOT.name}\n**Description**: {params.description}\n**Tech**: {params.tech_stack or 'N/A'}\n\nNext: `memory_onboard`"
 
 @mcp.tool(name="memory_agent_join", annotations={"title":"Register as Active Agent","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_agent_join(params: AgentJoinInput) -> str:
     """Register as an active agent.
 
@@ -1145,6 +1305,11 @@ async def memory_write(params: MemoryWriteInput) -> str:
     if err: return err
     _touch_heartbeat(params.agent_name)
     mem = _load_mem()
+    retracted = None
+    if params.retracts:
+        retracted = next((m for m in mem if m.get("id") == params.retracts), None)
+        if retracted is None:
+            return f"❌ Cannot retract memory `{params.retracts}`: target not found. No changes made."
     duplicate = _recent_duplicate_memory(mem, params)
     if duplicate:
         return (
@@ -1154,11 +1319,23 @@ async def memory_write(params: MemoryWriteInput) -> str:
         )
     priority = params.priority or 0
     is_pinned = priority >= 3
-    entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": params.memory_type,
+    entry_id = _id()
+    entry = {"id": entry_id, "agent_name": params.agent_name, "memory_type": params.memory_type,
              "title": params.title, "content": params.content, "tags": params.tags or [],
              "related_files": params.related_files or [], "related_tickets": params.related_tickets or [],
              "priority": priority,
              "pinned": is_pinned, "created_at": _now(), "timestamp": time.time()}
+    if retracted:
+        # Same demotion helper the unpin tool uses, so a retracted entry gets
+        # the same unpinned_by/unpinned_at audit as one demoted by hand.
+        # Retraction keeps its own fields too: they say WHICH entry supersedes
+        # this one, which the unpin fields cannot express.
+        _unpin_memory_entry(retracted, params.agent_name, f"retracted by {entry_id}")
+        if not str(retracted.get("title", "")).startswith("[RETRACTED]"):
+            retracted["title"] = f"[RETRACTED] {retracted.get('title', '')}"
+        retracted["retracted_by"] = entry_id
+        retracted["retracted_at"] = _now()
+        entry["retracts"] = retracted["id"]
     mem.append(_finalize_memory_entry(entry, params.pinned_summary)); _save_mem(mem)
     agents = _load_agt()
     for a in agents.values():
@@ -1173,7 +1350,22 @@ async def memory_write(params: MemoryWriteInput) -> str:
         links.append("files: " + ", ".join(f"`{f}`" for f in entry["related_files"][:5]))
     link_line = "\n" + " | ".join(links) if links else ""
     summary_line = f"\n📌 Pinned summary: {entry['pinned_summary']}" if is_pinned else ""
-    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}"
+    retract_line = f"\n↩️ Retracted `{retracted['id']}`" if retracted else ""
+    return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}{retract_line}"
+
+@mcp.tool(name="memory_unpin", annotations={"title":"Unpin Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+async def memory_unpin(params: MemoryUnpinInput) -> str:
+    """Unpin a memory without deleting it, preserving the audit record."""
+    err = _require_joined(params.agent_name)
+    if err: return err
+    _touch_heartbeat(params.agent_name)
+    mem = _load_mem()
+    target = next((m for m in mem if m.get("id") == params.memory_id), None)
+    if target is None:
+        return f"❌ Memory `{params.memory_id}` not found. No changes made."
+    _unpin_memory_entry(target, params.agent_name, params.reason)
+    _save_mem(mem)
+    return f"🔓 Unpinned `{target['id']}` — **{target.get('title', 'Untitled')}**; entry retained."
 
 @mcp.tool(name="memory_read", annotations={"title":"Read Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_read(params: MemoryReadInput) -> str:
@@ -1185,6 +1377,7 @@ async def memory_read(params: MemoryReadInput) -> str:
     if params.tag: f = [m for m in f if params.tag in m.get("tags",[])]
     if params.agent_name: f = [m for m in f if m.get("agent_name") == params.agent_name]
     if params.since_minutes: cut = time.time()-(params.since_minutes*60); f = [m for m in f if m.get("timestamp",0) >= cut]
+    if params.pinned_only: f = [m for m in f if m.get("pinned")]
     f.sort(key=lambda m: m.get("timestamp",0), reverse=True); f = f[:params.limit]
     if not f: return "No matches."
     if params.response_format == ResponseFormat.JSON: return json.dumps(f, indent=2)
@@ -1786,6 +1979,8 @@ async def memory_compact(params: CompactInput) -> str:
 
     for agent_name, entries in by_agent.items():
         summary = _rule_based_compress(entries)
+        if THRIFT_COMPACT_ENABLED:
+            summary = _thrift_compress_digest(summary)
 
         ts_range = ""
         timestamps = [e.get("created_at", "") for e in entries]
@@ -1890,7 +2085,9 @@ async def memory_token_usage() -> str:
 async def memory_prepare_compaction() -> str:
     """Returns cold entries grouped by agent session — ready for YOU to summarize.
 
-    Read the returned entries, write your own digest with memory_write(memory_type='context'),
+    Read the returned entries, write your own digest with memory_write(memory_type='context').
+    Digests are read ONLY by agents: write them in compressed English (token-thrift) —
+    facts, decisions, file paths; no prose. Code/paths/IDs stay verbatim.
     then run memory_compact() to archive the originals.
 
     Workflow:
@@ -2360,11 +2557,21 @@ def _auto_transition_claimed(idx: list) -> bool:
                 changed = True
     return changed
 
+def _status_str(value) -> str:
+    """Status as its wire value, never an enum repr.
+
+    On Python 3.11+ f-string formatting of a str-mixin Enum yields
+    'TicketStatus.SUBMITTED', not 'submitted'. Ticket .md files were carrying
+    that repr, which is both wrong and misleading to anyone reading them.
+    """
+    return str(getattr(value, "value", value) or "?")
+
+
 def _write_ticket_md(filepath: Path, data: dict):
     """Write a ticket as a human-readable .md file."""
     lines = [f"# {data.get('title', 'Untitled')}"]
     lines.append(f"**ID**: `{data.get('id', '?')}`")
-    lines.append(f"**Status**: {data.get('status', '?')}")
+    lines.append(f"**Status**: {_status_str(data.get('status'))}")
     lines.append(f"**Priority**: {data.get('priority', '?')}")
     lines.append(f"**Created by**: `{data.get('created_by', '?')}`")
     lines.append(f"**Created at**: {data.get('created_at', '?')}")
@@ -2394,7 +2601,7 @@ class CreateTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., description="Who is creating this ticket", min_length=1, max_length=100)
     title: str = Field(..., description="Short ticket title", min_length=1, max_length=200)
-    description: str = Field(..., description="What needs to be done — be specific", min_length=1, max_length=5000)
+    description: str = Field(..., description="What needs to be done — be specific. Board style: compressed English (the claiming agent reads this); code/paths/IDs verbatim", min_length=1, max_length=5000)
     target_url: str = Field(..., description="URL the executor must navigate to", min_length=1, max_length=500)
     scope: str = Field(..., description="Execution scope: 'READ-ONLY', 'interactive-no-send', or 'interactive'", pattern="^(READ-ONLY|interactive-no-send|interactive)$")
     required_fields: List[str] = Field(..., description="Deliverables the executor MUST capture (e.g. ['console-log', 'screenshot-load'])", min_length=1)
@@ -2414,17 +2621,19 @@ class SubmitTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., min_length=1, max_length=100)
     ticket_id: str = Field(..., min_length=1)
-    summary: str = Field(..., description="What was done", min_length=1, max_length=5000)
+    summary: str = Field(..., description="What was done. Board style: compressed English (the reviewer reads this); code/paths/IDs verbatim", min_length=1, max_length=5000)
     files_changed: Optional[List[str]] = Field(default_factory=list)
     notes: Optional[str] = Field(default=None, description="Any additional notes for reviewer", max_length=2000)
+    stay_active: bool = Field(default=False, description="Stay on board after submitting instead of auto-handing off. Set True if you are in a listen loop and want to wait for the verdict or retry after a rejection.")
 
 class ReviewTicketInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
     agent_name: str = Field(..., description="Reviewer agent name", min_length=1, max_length=100)
     ticket_id: str = Field(..., min_length=1)
     verdict: str = Field(..., description="'approve' or 'reject'", pattern="^(approve|reject)$")
-    review_notes: str = Field(..., description="Review feedback", min_length=1, max_length=5000)
-    fix_instructions: Optional[str] = Field(default=None, description="If rejected: how to fix", max_length=5000)
+    review_notes: str = Field(..., description="Review feedback. Board style: compressed English (the worker acts on this); code/paths/IDs verbatim", min_length=1, max_length=5000)
+    fix_instructions: Optional[str] = Field(default=None, description="If rejected: how to fix. Board style: compressed English (the retrying agent executes this); code/paths/IDs verbatim", max_length=5000)
+    allow_self_review: bool = Field(default=False, description="Set True only if you did this work yourself and no other agent is available to check it. Requires you to also own the ticket or hold a main/lead/reviewer role. The ticket is permanently marked SELF-REVIEWED.")
 
 class ListTicketsInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="ignore")
@@ -2441,6 +2650,22 @@ def _ticket_creator_is_active(ticket: dict) -> bool:
         agent.get("agent_name") == creator and agent.get("status") == AgentStatus.ACTIVE
         for agent in _load_agt().values()
     )
+
+def _ticket_role_gate(agent_name: str, ticket: dict, target: str,
+                      allow_self_review: bool = False) -> tuple[bool, str]:
+    """Authorize a ticket transition. Returns (allowed, basis_or_reason).
+
+    Thin adapter: resolves the agent's coordinator status from live state and
+    hands the decision to ticket_roles, which is pure. Same (ok, basis) shape
+    as _ticket_control_permission so callers read alike.
+    """
+    actor = _active_agent_info(agent_name)
+    is_coord = _agent_role_value(actor) in COORDINATOR_ROLES
+    return ticket_roles.can_transition(
+        ticket.get("status"), target,
+        agent_name=agent_name, ticket=ticket,
+        is_coordinator=is_coord, allow_self_review=allow_self_review)
+
 
 def _ticket_control_permission(agent_name: str, ticket: dict, action: str) -> tuple[bool, str]:
     """Return whether an onboarded agent can cancel/terminate a ticket and why."""
@@ -2463,6 +2688,7 @@ def _ticket_control_permission(agent_name: str, ticket: dict, action: str) -> tu
 
 
 @mcp.tool(name="memory_create_ticket", annotations={"title":"Create Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_create_ticket(params: CreateTicketInput) -> str:
     """Create a ticket requesting help from another agent.
 
@@ -2519,6 +2745,7 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
 
 
 @mcp.tool(name="memory_claim_ticket", annotations={"title":"Claim Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@_with_board_lock
 async def memory_claim_ticket(params: ClaimTicketInput) -> str:
     """Claim an open ticket (sets to claimed). Call again on a claimed ticket to advance to in_progress (e.g. when spawning a subagent)."""
     err = _require_joined(params.agent_name)
@@ -2553,6 +2780,7 @@ async def memory_claim_ticket(params: ClaimTicketInput) -> str:
 
 
 @mcp.tool(name="memory_submit_ticket", annotations={"title":"Submit Work for Review","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     """Submit completed work on a ticket for review.
 
@@ -2565,9 +2793,12 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
-            if t["status"] not in (TicketStatus.CLAIMED, TicketStatus.IN_PROGRESS, TicketStatus.CREATING_REPORT, TicketStatus.REJECTED, TicketStatus.IN_REVIEW):
-                return f"Ticket `{t['id']}` is {t['status']} — can only submit claimed/in_progress/creating_report tickets."
+            ok, basis = _ticket_role_gate(params.agent_name, t, TicketStatus.SUBMITTED.value)
+            if not ok:
+                return f"❌ `{params.agent_name}` cannot submit `{t['id']}`.\n{basis}"
             t["status"] = TicketStatus.SUBMITTED
+            t["submitted_by"] = params.agent_name
+            t["submit_permission"] = basis
             t["updated_at"] = _now()
             _save_ticket_index(idx)
 
@@ -2595,14 +2826,28 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
             submit_path = _tickets_dir() / "review" / f"{t['id']}-submit.md"
             submit_path.write_text("\n".join(submit_lines), encoding="utf-8")
 
-            # Auto-handoff: agent submitted work, should leave for reviewer
-            agents = _load_agt()
-            for a in agents.values():
-                if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
-                    a["status"] = AgentStatus.HANDED_OFF
-                    a["handed_off_at"] = _now()
-                    break
-            _save_agt(agents)
+            # Auto-handoff: agent submitted work, should leave for reviewer.
+            # A listening peer passes stay_active=True so it remains on board
+            # and can wait for the verdict / take the rejected -> retry path.
+            #
+            # But never hand off an agent that still owes a review. If it owns
+            # another ticket already sitting in 'submitted', leaving now means
+            # that review never happens. Observed live: codex submitted its own
+            # ticket, auto-handed off, and its peer's submission then sat
+            # unreviewed with nobody on board to adjudicate it.
+            owed = [x["id"] for x in idx
+                    if x.get("id") != t["id"]
+                    and x.get("created_by") == params.agent_name
+                    and _status_str(x.get("status")) == TicketStatus.SUBMITTED.value]
+
+            if not params.stay_active and not owed:
+                agents = _load_agt()
+                for a in agents.values():
+                    if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
+                        a["status"] = AgentStatus.HANDED_OFF
+                        a["handed_off_at"] = _now()
+                        break
+                _save_agt(agents)
 
             # Write handoff memory
             mem = _load_mem()
@@ -2624,16 +2869,26 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
             }))
             _save_mem(mem)
 
+            if params.stay_active:
+                closing = "Still on board — re-arm `memory_wait_for_event` to catch the verdict."
+            elif owed:
+                owed_list = ", ".join(f"`{i}`" for i in owed[:3])
+                closing = (f"Kept you on board: you owe a review on {owed_list}. "
+                           f"Adjudicate before leaving — handing off now would strand it.")
+            else:
+                closing = "You're off board. Reviewer will pick this up."
+
             return (
                 f"📤 Submitted `{t['id']}` for review!\n"
                 f"**{t['title']}** by `{params.agent_name}`\n"
                 f"Report: `tickets/review/{t['id']}-submit.md`\n\n"
-                f"🤝 You're off board. Reviewer will pick this up."
+                f"🤝 " + closing
             )
     return f"Ticket `{params.ticket_id}` not found."
 
 
 @mcp.tool(name="memory_review_ticket", annotations={"title":"Review Submitted Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@_with_board_lock
 async def memory_review_ticket(params: ReviewTicketInput) -> str:
     """Review a submitted ticket. Approve → closed/ or Reject → rejected/.
 
@@ -2647,9 +2902,14 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     _touch_heartbeat(params.agent_name)
     for t in idx:
         if t["id"] == params.ticket_id:
-            if t["status"] not in (TicketStatus.SUBMITTED, TicketStatus.IN_REVIEW):
-                return f"Ticket `{t['id']}` is {t['status']} — can only review submitted tickets."
+            ok, basis = _ticket_role_gate(
+                params.agent_name, t, TicketStatus.REVIEWING.value,
+                allow_self_review=getattr(params, "allow_self_review", False))
+            if not ok:
+                return f"❌ `{params.agent_name}` cannot review `{t['id']}`.\n{basis}"
             t["status"] = TicketStatus.REVIEWING
+            t["reviewed_by"] = params.agent_name
+            t["review_permission"] = basis
             t["updated_at"] = _now()
             _save_ticket_index(idx)
 
@@ -2660,6 +2920,11 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 t["status"] = TicketStatus.CLOSED
                 t["reviewed_by"] = params.agent_name
                 t["reviewed_at"] = _now()
+                t["review_notes"] = params.review_notes
+                # Clear the verdict of any EARLIER rejection: fields persist on
+                # the dict, so an approve-after-retry event would otherwise
+                # render the stale "Fix: ..." from the round that failed.
+                t.pop("fix_instructions", None)
                 t["updated_at"] = _now()
                 _save_ticket_index(idx)
 
@@ -2669,6 +2934,12 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     shutil.move(str(ticket_file), str(dest / ticket_file.name))
                 if submit_file.exists():
                     shutil.move(str(submit_file), str(dest / submit_file.name))
+                # The moved copy still carries whatever status it had when it
+                # was last written, so closed tickets read 'submitted' forever.
+                # Rewrite it here: _index.json is the source of truth, but a
+                # human diagnosing a problem reads the .md, and a stale one
+                # sends them down the wrong path.
+                _write_ticket_md(dest / f"{t['id']}.md", t)
 
                 # Write review result
                 review_path = dest / f"{t['id']}-review.md"
@@ -2683,6 +2954,7 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
 
                 # Log as memory
                 mem = _load_mem()
+                _demote_rejection_warnings(mem, t["id"], "closed", params.agent_name)
                 mem.append({
                     "id": _id(), "agent_name": params.agent_name,
                     "memory_type": MemoryType.PROGRESS,
@@ -2693,26 +2965,19 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                 })
                 _save_mem(mem)
 
-                # Auto-handoff reviewer
-                agents = _load_agt()
-                for a in agents.values():
-                    if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
-                        a["status"] = AgentStatus.HANDED_OFF
-                        a["handed_off_at"] = _now()
-                        break
-                _save_agt(agents)
-
                 return (
                     f"✅ Approved `{t['id']}`: **{t['title']}**\n"
                     f"Moved to `tickets/closed/`\n"
                     f"Reviewed by `{params.agent_name}`\n\n"
-                    f"🤝 Ticket closed. You're off board."
+                    f"Ticket closed. You're still on board — review the next one or keep working."
                 )
 
             else:  # reject
                 t["status"] = TicketStatus.REJECTED
                 t["reviewed_by"] = params.agent_name
                 t["reviewed_at"] = _now()
+                t["review_notes"] = params.review_notes
+                t["fix_instructions"] = params.fix_instructions
                 t["updated_at"] = _now()
                 _save_ticket_index(idx)
 
@@ -2759,31 +3024,24 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
                     "memory_type": MemoryType.WARNING,
                     "title": f"❌ Rejected {t['id']}: {t['title']}",
                     "content": f"Rejected work by `{t.get('claimed_by','?')}`. {params.review_notes[:200]}\nFix: {(params.fix_instructions or 'See rejection note')[:200]}",
-                    "tags": ["ticket","rejected"], "related_files": [],
+                    "tags": ["ticket", "rejected", "auto-rejection"], "related_files": [],
+                    "related_tickets": [t["id"]],
                     "priority": 2, "pinned": True, "created_at": _now(), "timestamp": time.time()
                 }))
                 _save_mem(mem)
-
-                # Auto-handoff reviewer — ticket reopened, next agent will see it
-                agents = _load_agt()
-                for a in agents.values():
-                    if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
-                        a["status"] = AgentStatus.HANDED_OFF
-                        a["handed_off_at"] = _now()
-                        break
-                _save_agt(agents)
 
                 return (
                     f"❌ Rejected `{t['id']}`: **{t['title']}**\n"
                     f"Rejection note: `tickets/rejected/{t['id']}-rejected.md`\n"
                     f"Ticket reopened for next agent to fix.\n"
                     f"Reviewed by `{params.agent_name}`\n\n"
-                    f"🤝 You're off board. Next agent will get back on board and see this ticket."
+                    f"You're still on board — the reopened ticket is ready for the next agent to claim."
                 )
     return f"Ticket `{params.ticket_id}` not found."
 
 
 @mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@_with_board_lock
 async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
     """Cancel a ticket. Creator, claimed agent, active main/reviewer, or any onboarded agent when creator is unavailable."""
     err = _require_joined(agent_name)
@@ -2804,12 +3062,16 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
             if reason:
                 t["cancel_reason"] = reason
             _save_ticket_index(idx)
+            mem = _load_mem()
+            if _demote_rejection_warnings(mem, t["id"], "canceled", agent_name):
+                _save_mem(mem)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."
 
 
 @mcp.tool(name="memory_terminate_ticket", annotations={"title":"Terminate Ticket","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":False})
+@_with_board_lock
 async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
     """Forcefully terminate a ticket at any stage. Creator or active main/reviewer only."""
     err = _require_joined(agent_name)
@@ -2830,6 +3092,9 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
             if reason:
                 t["terminate_reason"] = reason
             _save_ticket_index(idx)
+            mem = _load_mem()
+            if _demote_rejection_warnings(mem, t["id"], "terminated", agent_name):
+                _save_mem(mem)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
             return f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
     return f"Ticket `{ticket_id}` not found."
@@ -2880,6 +3145,257 @@ async def memory_list_tickets(params: ListTicketsInput) -> str:
     return "\n".join(lines)
 
 
+# ═══════════════════════════════════════════════════════
+# A2A — blocking wait. Loop + rationale live in a2a_wait.py
+# ═══════════════════════════════════════════════════════
+
+# Cursor is one file PER AGENT. A shared watch.json would be read-modify-
+# written by two server PROCESSES (one per Desktop instance): lost updates
+# revert the peer's cursor (duplicate delivery), and JsonMemoryStore writes
+# via a fixed fp.with_suffix('.tmp') path, so two concurrent saves interleave
+# into one tmp file and corrupt it. Per-agent files have exactly one writer.
+def _safe_agent_fname(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "_", name or "unknown")[:64]
+
+def _watch_p(agent_name: str):
+    return MEMORY_DIR / f"watch-{_safe_agent_fname(agent_name)}.json"
+
+def _load_watch(agent_name: str):
+    """This agent's cursor, falling back once to the legacy shared file."""
+    cur = _load(_watch_p(agent_name))
+    if cur.get("snapshot") is not None:
+        return cur["snapshot"]
+    legacy = _load(MEMORY_DIR / "watch.json").get("agents", {})
+    return legacy.get(agent_name)
+
+def _load_watch_idles(agent_name: str) -> int:
+    """Consecutive empty parks this agent has already burned.
+
+    Cursor files written before the idle budget existed carry no such key,
+    so they read as a fresh counter and need no migration.
+    """
+    try:
+        return max(0, int(_load(_watch_p(agent_name)).get("idle_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _save_watch(agent_name: str, snapshot: dict, idle_count: int = 0):
+    _save(_watch_p(agent_name), {"snapshot": snapshot, "idle_count": idle_count})
+
+
+def _idle_budget_idles(idle_budget_min, per_park_s: int):
+    """Minutes of patience -> number of empty parks, rounded up.
+
+    The budget is expressed in minutes because a human watching a listener is
+    counting wall clock, not iterations; the loop can only act on whole parks,
+    so the conversion happens once, here.
+    """
+    if not idle_budget_min or idle_budget_min <= 0:
+        return None
+    per = max(1, int(per_park_s))
+    return max(1, -(-int(idle_budget_min) * 60 // per))
+
+
+_SNAPSHOT_CACHE: dict = {"key": None, "snap": None}
+
+
+def _snapshot_source_key():
+    """Identity of the two files a snapshot is built from.
+
+    (mtime_ns, size) per file. Size is carried alongside mtime because a
+    same-nanosecond rewrite is conceivable on filesystems with coarse clocks;
+    a change that alters neither is not observable here by design.
+    """
+    key = []
+    for path in (_ticket_index_p(), _mem_p()):
+        try:
+            st = path.stat()
+            key.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            key.append(None)
+    return tuple(key)
+
+
+def _board_snapshot() -> dict:
+    """Current board keyed by id, so diffing never depends on list ordering.
+
+    Skips the re-parse when neither source file has changed since the last
+    call. A parked listener polls every 2s and the common case is that nothing
+    moved, so this turns a full JSON parse of memories.json + the ticket index
+    into two stat() calls per tick, per listener.
+
+    The cached dict is returned by identity. Treat the result as READ-ONLY:
+    a2a_wait only diffs it, and _reduce_snapshot builds fresh dicts before
+    anything is persisted. A caller that mutates it would poison later ticks.
+    """
+    key = _snapshot_source_key()
+    if _SNAPSHOT_CACHE["snap"] is not None and _SNAPSHOT_CACHE["key"] == key:
+        return _SNAPSHOT_CACHE["snap"]
+    snap = {
+        "tickets": {t["id"]: t for t in _load_ticket_index() if t.get("id")},
+        "memories": {m["id"]: m for m in _load_mem() if m.get("id")},
+    }
+    _SNAPSHOT_CACHE["key"] = key
+    _SNAPSHOT_CACHE["snap"] = snap
+    return snap
+
+
+def _reduce_snapshot(snap: dict) -> dict:
+    """Shrink a snapshot to only the fields the diff actually reads.
+
+    Events are built from `cur`, which needs full ticket dicts. `prev` is read
+    for status/assigned_to alone, so persisting the reduced form keeps
+    watch.json small no matter how many tickets accumulate.
+    """
+    return {
+        "tickets": {k: {"status": v.get("status"),
+                        "assigned_to": v.get("assigned_to"),
+                        "rejection_count": v.get("rejection_count")}
+                    for k, v in snap.get("tickets", {}).items()},
+        "memories": {k: {} for k in snap.get("memories", {})},
+    }
+
+
+class WaitForEventInput(BaseModel):
+    agent_name: str = Field(description="Your agent name (must already be on board)")
+    kinds: Optional[List[str]] = Field(
+        default=None,
+        description="Kinds to wake on: ticket_created, ticket_status_changed, "
+                    "ticket_assigned, memory_written. Default: the three ticket kinds.")
+    timeout_s: int = Field(default=180, description="Seconds to park. Clamped to 200 unless long_wait.")
+    only_mine: bool = Field(default=True, description="Wake only on events assigned to you, unassigned, or on tickets you created")
+    long_wait: bool = Field(default=False, description="stdio clients (Claude Code) ONLY — allows up to 3600s. Never set from Claude Desktop: it cancels at ~240s and repeated cancels wedge every connected MCP server until restart.")
+    idle_budget_min: Optional[int] = Field(default=15, description="Minutes of consecutive empty parks before the server answers STAND-DOWN instead of idle. Stated in minutes because that is what a human watching the loop counts. 0 or null listens indefinitely. The counter resets only on a real event, not on re-arming.")
+
+
+@mcp.tool(name="memory_wait_for_event", annotations={"title":"Wait for Board Event","readOnlyHint":True,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+async def memory_wait_for_event(params: WaitForEventInput) -> str:
+    """Park until another agent acts, then return everything pending.
+
+    The listening half of On Board. Instead of a human relaying messages, an
+    agent blocks here until a peer creates a ticket, changes a status, or
+    assigns work.
+
+    Returns instantly if events piled up since your last call, so re-arming
+    after a gap costs one call rather than an empty wake. One wake drains the
+    whole queue. You never wake on your own actions.
+
+    Re-arm by calling it again — the cursor is stored per agent, so you carry
+    no bookkeeping.
+    """
+    err = _require_joined(params.agent_name)
+    if err: return err
+
+    baseline = _load_watch(params.agent_name)
+    per_park = a2a_wait.clamp_timeout(params.timeout_s, desktop_safe=not params.long_wait)
+    budget_idles = _idle_budget_idles(params.idle_budget_min, per_park)
+
+    result = await a2a_wait.wait_for_events(
+        _board_snapshot,
+        agent_name=params.agent_name,
+        baseline=baseline,
+        kinds=params.kinds,
+        only_mine=params.only_mine,
+        timeout_s=params.timeout_s,
+        desktop_safe=not params.long_wait,
+        heartbeat_fn=lambda: _touch_heartbeat(params.agent_name),
+        idle_count=_load_watch_idles(params.agent_name),
+        idle_budget_idles=budget_idles,
+    )
+
+    # Sole writer of this agent's cursor file — no cross-process RMW.
+    _save_watch(params.agent_name, _reduce_snapshot(result["snapshot"]),
+                idle_count=result["idle_count"])
+
+    if result["status"] == a2a_wait.STAND_DOWN:
+        spent_min = round(result["idle_count"] * result["timeout_s"] / 60)
+        return (f"🛑 STAND-DOWN after {result['idle_count']} empty parks (~{spent_min} min).\n"
+                f"The board did not move. Do NOT re-arm on your own — stop listening, "
+                f"report what you were waiting for, and hand back to the human.\n"
+                f"To keep going anyway, call again with a fresh `idle_budget_min`.")
+
+    if result["status"] == a2a_wait.IDLE:
+        line = f"😴 Nothing in {result['timeout_s']}s — board unchanged."
+        if budget_idles:
+            left = max(0, budget_idles - result["idle_count"])
+            mins = round(left * result["timeout_s"] / 60)
+            line += (f"\nidle {result['idle_count']}/{budget_idles}"
+                     f" — ~{mins} min to stand-down")
+        return line + "\nCall `memory_wait_for_event` again to keep listening."
+
+    head = f"🔔 {result['event_count']} event(s) after {result['waited_s']}s"
+    if result["drained_backlog"]:
+        head += " (backlog drained)"
+    lines = [head]
+    for e in result["events"]:
+        k = e.get("kind")
+        if k == a2a_wait.TICKET_CREATED:
+            who = e.get("assigned_to") or "anyone"
+            lines.append(f"- 🆕 `{e['ticket_id']}` **{e['title']}** by `{e['created_by']}` → {who}")
+        elif k == a2a_wait.TICKET_STATUS_CHANGED:
+            rejected = a2a_wait.rejection_happened(e)
+            arrow = "**REJECTED → open**" if rejected else f"**{e['status']}**"
+            lines.append(f"- 🎫 `{e['ticket_id']}` {e.get('previous_status')} → {arrow} — {e['title']}")
+            if rejected:
+                lines.append(f"    ❌ attempt #{e['rejection_count']} — reclaim to retry")
+            if e.get("review_notes"):
+                lines.append(f"    💬 `{e.get('reviewed_by')}`: {e['review_notes'][:400]}")
+            if e.get("fix_instructions"):
+                lines.append(f"    🔧 Fix: {e['fix_instructions'][:400]}")
+        elif k == a2a_wait.TICKET_ASSIGNED:
+            lines.append(f"- 📌 `{e['ticket_id']}` now assigned to **{e.get('assigned_to')}** — {e['title']}")
+        else:
+            lines.append(f"- 📝 {e.get('type')} by `{e.get('agent_name')}` — {e.get('title')}")
+    lines.append("\nAct on these, then call `memory_wait_for_event` again to re-arm.")
+    return "\n".join(lines)
+
+
+@mcp.prompt(name="listen", description="Park and wait for another agent to act — the cheap re-arm loop.")
+def prompt_listen(agent_name: str = "claude", timeout_s: str = "180") -> str:
+    return (
+        f"Enter listen mode as `{agent_name}`.\n\n"
+        f"1. Call `memory_wait_for_event(agent_name='{agent_name}', timeout_s={timeout_s})`.\n"
+        f"2. Act on every event it returns — claim tickets addressed to you, "
+        f"review submissions on tickets you created, and on a rejection read the "
+        f"fix instructions carried in the payload and retry without asking.\n"
+        f"3. Re-arm by calling it again. The server keeps the patience budget, "
+        f"so you do not have to count rounds yourself.\n"
+        f"4. If a call comes back STAND-DOWN, stop. Do not re-arm on your own "
+        f"judgement — summarise what you were waiting for and hand back to me. "
+        f"Pass `idle_budget_min` to widen or disable the budget (0 listens "
+        f"forever); the countdown prints on every idle reply.\n"
+        f"5. Stop also when I say STOP.\n\n"
+        f"Do not check in with me between cycles — just keep listening.\n"
+        f"When you write to the board (claims, submits, reviews), follow BOARD STYLE from onboarding: compressed English for machine-read fields, verbatim code/paths/IDs.\n\n"
+        f"Measured 2026-07-26 across two live Desktop instances: the ~240s client "
+        f"cancel is PER CALL, not cumulative per turn. Five consecutive re-arms "
+        f"totalling 340s of blocking ran clean, no cut and no wedged servers. So "
+        f"many short parks are safe and one long park is not — keep timeout_s at "
+        f"or under 180 and re-arm freely rather than raising it."
+    )
+
+
+# ── Board writing style (token-thrift for A2A) ──────────
+# Board entries are agent-to-agent payloads first, human-inspectable second.
+# token-thrift's audience rule maps onto On Board fields like this — and the
+# language rule dominates everything else: Thai measures 2.96x English tokens
+# for identical content, and one hop's output is the next hop's input.
+BOARD_STYLE = (
+    "BOARD STYLE (token-thrift): board entries are read by agents, only "
+    "skimmed by humans.\n"
+    "- Machine-read fields (memory content, ticket description, submit "
+    "summary/notes, review_notes, fix_instructions, digests): write ENGLISH, "
+    "compressed — drop articles, filler, hedging, restatements; facts and "
+    "actions only.\n"
+    "- Human-skim fields (title, pinned_summary): stay clear and readable; "
+    "any language.\n"
+    "- VERBATIM always: code, paths, IDs, numbers, error strings, and the "
+    "user's own words (never translate or paraphrase them across hops).\n"
+    "- If unsure a human will read it in full, do not compress."
+)
+
+
 @mcp.prompt(name="on-board", description="Join the project and get compact current context — always run this first.")
 def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-desktop") -> str:
     return (
@@ -2889,7 +3405,8 @@ def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-de
         f"   - agent_platform: \"{agent_platform}\"\n"
         f"   - mode: \"normal\"\n\n"
         f"2. Report back: who is active, what tickets need attention, and what details you will load next if needed.\n\n"
-        f"Do not start any work until `memory_onboard` has completed."
+        f"Do not start any work until `memory_onboard` has completed.\n\n"
+        + BOARD_STYLE
     )
 
 

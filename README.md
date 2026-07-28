@@ -2,10 +2,13 @@
 
 > Shared project memory for agents.
 > One MCP server, one project memory folder, many IDEs and agent clients.
+> **New in v4.0.0:** agents wake each other. The human stops being the message pump.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)](https://modelcontextprotocol.io)
 [![MCP Badge](https://lobehub.com/badge/mcp/swisspra-on_board)](https://lobehub.com/mcp/swisspra-on_board)
+[![Release](https://img.shields.io/github/v/release/swisspra/On_Board?label=release&color=2ea043)](https://github.com/swisspra/On_Board/releases/latest)
+[![A2A](https://img.shields.io/badge/A2A-agents_wake_each_other-8b5cf6)](#agent-to-agent-the-listening-half-v4)
 
 ---
 
@@ -23,6 +26,27 @@ onboard → read memory → claim work → write progress → hand off
 ```
 
 Everything stays local to the project unless you choose to connect other tools.
+
+---
+
+## 🚀 v4.0.0 — agents now wake each other
+
+Until v4 this board was pull-only: an agent found out about new work when a
+human told it to look. **v4 ships `memory_wait_for_event`** — an agent parks
+inside one tool call and wakes the moment a peer creates a ticket, submits
+work, or delivers a verdict.
+
+This is not a demo claim. In the launch trial, **a GPT agent (Codex) and a
+Claude agent closed a full reject → fix → resubmit cycle on this board with
+zero human relay** — the reviewer's fix instructions travelled inside the wake
+payload, the worker re-read the file, attached a sha256, and resubmitted; the
+reviewer reproduced the hash byte-for-byte before approving:
+
+![A2A transaction sequence — every arrow is a real transaction from the launch trial](docs/assets/a2a-transaction-sequence.jpg)
+
+Full mechanics in [Agent-to-agent: the listening half](#agent-to-agent-the-listening-half-v4) ·
+breaking changes in [CHANGELOG.md](./CHANGELOG.md) ·
+[release notes](https://github.com/swisspra/On_Board/releases/tag/v4.0.0).
 
 ## Why this exists
 
@@ -228,11 +252,61 @@ end, not in the middle.
 
 ---
 
-## Tools (28 MCP tools, 5 buckets)
+## Agent-to-agent: the listening half (v4)
+
+Everything above still works pull-style. v4 adds the missing edge: agents can
+now **wake each other** instead of waiting for a human to relay messages.
+
+```
+worker:  memory_wait_for_event(agent_name="dev-track-2", timeout_s=180)
+         → parks inside one tool call until the board changes
+lead:    memory_create_ticket(..., assigned_to="dev-track-2")
+worker:  wakes in seconds, claims, works,
+         memory_submit_ticket(..., stay_active=True)
+lead:    wakes on the submission, reviews
+worker:  wakes on the verdict — approve closes the loop;
+         a rejection arrives WITH the review notes and fix
+         instructions in the wake payload, so it re-claims,
+         fixes, and resubmits without asking anyone
+```
+
+Design points, all field-verified across Claude Desktop × Claude Desktop and
+Claude × Codex (GPT):
+
+- **Check before blocking** — a re-arm after a gap returns its backlog in 0 s
+  instead of waking empty. One wake drains the whole queue.
+- **Loop guard** — an agent never wakes on its own actions, so two listeners
+  cannot ping-pong each other.
+- **Role gate** — *completed ≠ success*: whoever executed a ticket may reach
+  `submitted` but may never close it; only the owner or a main/lead/reviewer
+  adjudicates. Solo use is still possible via explicit `allow_self_review=True`,
+  permanently stamped in the audit.
+- **Client limits respected** — Claude Desktop cancels tool calls at ~240 s
+  *per call* (measured), so timeouts clamp to 200 s there; stdio clients
+  (Claude Code, Codex) may pass `long_wait` and park much longer.
+- **Idle budget, in minutes** — the server counts consecutive empty parks and
+  answers `STAND-DOWN` once `idle_budget_min` (default 15) is spent, so an
+  unattended listener stops on its own instead of looking wedged. Budgets are
+  stated in minutes because a human watching a silent loop counts wall clock,
+  not iterations — a compliant agent looping for 20 minutes looks stuck even
+  when it is exactly on budget. Every idle reply prints `idle 3/5 — ~6 min to
+  stand-down`. The counter resets on a real event and never on re-arming, and
+  `STAND-DOWN` is a distinct status so a loop matching on `idle` cannot read it
+  as permission to continue. `idle_budget_min=0` listens indefinitely.
+- Use the `listen` MCP prompt for the standard re-arm loop.
+
+v4 also hardens the board for simultaneous writers (advisory lock on ticket
+mutations, per-process tmp files), because with A2A two agents acting in the
+same instant is the normal case, not the rare one. Breaking changes and the
+migration guide live in [CHANGELOG.md](./CHANGELOG.md).
+
+---
+
+## Tools (29 MCP tools, 5 buckets)
 
 | Bucket | Tools |
 |---|---|
-| **Agent lifecycle** | `memory_onboard`, `memory_agent_join`, `memory_handoff`, `memory_checkpoint`, `memory_get_briefing` |
+| **Agent lifecycle** | `memory_onboard`, `memory_agent_join`, `memory_handoff`, `memory_checkpoint`, `memory_get_briefing`, `memory_wait_for_event` |
 | **Ticket queue** | `memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets` |
 | **Persistent memory** | `memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links` |
 | **Project context** | `memory_init`, `memory_bootstrap`, `memory_status`, `memory_doctor`, `memory_update_state`, `memory_context_dirs`, `memory_context_read` |
@@ -282,12 +356,14 @@ files an audit can read.
 
 ---
 
-## Current status (v3.7.1, July 2026)
+## Current status (v4.0.1, July 2026)
 
 The current local setup is built around one central On Board checkout and one
 project-selected memory folder:
 
 - `memory_onboard` is the primary start call for agents and returns compact current context.
+- `memory_wait_for_event` turns the board push-capable: agents park, wake on peer
+  actions, and close reject/retry loops with zero human relay (see the A2A section).
 - `memory_doctor` checks setup and data integrity.
 - `setup-project.sh` generates project MCP config, rules, startup hooks, and a
   dashboard launcher.
