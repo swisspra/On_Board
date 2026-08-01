@@ -2801,9 +2801,21 @@ async def memory_claim_ticket(params: ClaimTicketInput) -> str:
                 )
             if t["status"] not in (TicketStatus.OPEN,):
                 return f"Ticket `{t['id']}` is already {t['status']}."
+            # The assignment gate. ticket_roles.may_claim has existed since the
+            # module was ported and had no caller: claiming was the one lifecycle
+            # move with no authorization at all, so a ticket addressed to someone
+            # else could be taken by anyone who asked. Routed through the same
+            # helper submit and review use, so all three read alike and record a
+            # basis. Reaching here means status is OPEN, so this cannot intercept
+            # the re-claim heartbeat above.
+            ok, basis = _ticket_role_gate(params.agent_name, t,
+                                          TicketStatus.CLAIMED.value)
+            if not ok:
+                return f"❌ `{params.agent_name}` cannot claim `{t['id']}`.\n{basis}"
             t["status"] = TicketStatus.CLAIMED
             t["claimed_by"] = params.agent_name
             t["claimed_at"] = time.time()
+            t["claim_permission"] = basis
             t["updated_at"] = _now()
             _save_ticket_index(idx)
             _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)

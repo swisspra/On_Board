@@ -1021,3 +1021,110 @@ def test_server_icons_declared_only_when_the_asset_exists(tmp_path):
         assert icons[0].mimeType == "image/png"
     finally:
         server._ICON_PATH = original
+
+
+def _seed_claim_fixtures(server):
+    """One directed ticket and one open-queue ticket, both claimable."""
+    now = time.time()
+    server._tickets_dir()
+    server._save_ticket_index([
+        {
+            "id": "TK-directed", "title": "Addressed to one agent",
+            "description": "assigned_to must be honoured.", "target_url": "local",
+            "scope": "READ-ONLY", "required_fields": ["result"], "priority": "medium",
+            "status": "open", "created_by": "owner", "assigned_to": "codex",
+            "claimed_by": None, "created_at": "2026-08-01T09:00:00",
+            "updated_at": "2026-08-01T09:00:00", "timestamp": now,
+        },
+        {
+            "id": "TK-queue", "title": "Open to anyone",
+            "description": "No assignee means the open queue.", "target_url": "local",
+            "scope": "READ-ONLY", "required_fields": ["result"], "priority": "medium",
+            "status": "open", "created_by": "owner", "assigned_to": None,
+            "claimed_by": None, "created_at": "2026-08-01T09:00:00",
+            "updated_at": "2026-08-01T09:00:00", "timestamp": now,
+        },
+    ])
+
+
+def _join(server, name, role):
+    asyncio.run(server.memory_onboard(server.OnboardInput(
+        agent_name=name, agent_platform="codex", agent_role=role,
+        mode="brief", include_tickets=False, include_health=False)))
+
+
+def test_assigned_ticket_cannot_be_claimed_by_another_agent(tmp_path):
+    """The hole this closes: claiming was the only lifecycle move with no gate.
+
+    Seen in practice: tickets addressed to one agent were claimed by a
+    differently-named agent that had spawned for the occasion, because
+    ticket_roles.may_claim forbade it but had no caller anywhere in the server.
+    """
+    server = load_server(tmp_path)
+    server._save_prj({"description": "claim gate", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_claim_fixtures(server)
+    _join(server, "codex-sub-spawned", "worker")
+
+    out = asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="codex-sub-spawned", ticket_id="TK-directed")))
+
+    assert "cannot claim" in out
+    assert "codex" in out
+    ticket = {t["id"]: t for t in server._load_ticket_index()}["TK-directed"]
+    assert ticket["status"] == "open", "a refused claim must not move the ticket"
+    assert ticket["claimed_by"] is None
+
+
+def test_assignee_and_coordinator_may_claim_and_the_basis_is_recorded(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "claim gate", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_claim_fixtures(server)
+    _join(server, "codex", "worker")
+    _join(server, "lead-agent", "lead")
+
+    assert "Claimed" in asyncio.run(server.memory_claim_ticket(
+        server.ClaimTicketInput(agent_name="codex", ticket_id="TK-directed")))
+    tickets = {t["id"]: t for t in server._load_ticket_index()}
+    assert tickets["TK-directed"]["claimed_by"] == "codex"
+    # claim_permission was None on every ticket ever written before this gate.
+    assert tickets["TK-directed"]["claim_permission"]
+
+    # A coordinator may take work addressed to someone else; that is the
+    # documented escape hatch in may_claim, not an accident.
+    _seed_claim_fixtures(server)
+    assert "Claimed" in asyncio.run(server.memory_claim_ticket(
+        server.ClaimTicketInput(agent_name="lead-agent", ticket_id="TK-directed")))
+
+
+def test_open_queue_stays_a_free_for_all(tmp_path):
+    """Racing for unassigned work is a feature and must survive the gate."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "claim gate", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_claim_fixtures(server)
+    _join(server, "stranger", "worker")
+
+    out = asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="stranger", ticket_id="TK-queue")))
+
+    assert "Claimed" in out
+    assert {t["id"]: t for t in server._load_ticket_index()}["TK-queue"]["claimed_by"] == "stranger"
+
+
+def test_gate_does_not_intercept_the_reclaim_heartbeat(tmp_path):
+    """Calling claim again on your own claimed ticket still advances it."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "claim gate", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_claim_fixtures(server)
+    _join(server, "codex", "worker")
+
+    asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="codex", ticket_id="TK-directed")))
+    again = asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="codex", ticket_id="TK-directed")))
+
+    assert "in_progress" in again
+    assert {t["id"]: t for t in server._load_ticket_index()}["TK-directed"]["status"] == "in_progress"
