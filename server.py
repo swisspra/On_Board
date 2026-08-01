@@ -16,7 +16,7 @@ Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
 import json, os, time, hashlib, math, re, base64
-import asyncio, functools
+import asyncio, functools, contextlib
 try:
     import fcntl                      # POSIX only
 except ImportError:                   # Windows: no fcntl; degrade gracefully
@@ -259,6 +259,33 @@ def _board_lock_path() -> Path:
     STORE.ensure()
     return STORE.memory_dir / ".board.lock"
 
+@contextlib.asynccontextmanager
+async def _board_lock():
+    """Hold the board lock for the enclosed block only.
+
+    Use this instead of @_with_board_lock when a tool does a short mutation
+    followed by expensive read-only work: memory_onboard joins (must be
+    serialized) and then renders a full briefing (must not hold the lock).
+
+    NOT REENTRANT. flock is per open file description and this opens a fresh
+    fd each time, so a locked block nested inside another locked block on the
+    same process deadlocks permanently. Never use inside a @_with_board_lock
+    function, and never call a @_with_board_lock tool from inside this block.
+    """
+    if fcntl is None:
+        # Windows: no flock. Same graceful degradation as the decorator.
+        yield
+        return
+    fd = os.open(_board_lock_path(), os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
 def _with_board_lock(fn):
     @functools.wraps(fn)
     async def _locked(*args, **kwargs):
@@ -268,15 +295,8 @@ def _with_board_lock(fn):
             # crashing the whole server on import. Single-instance use is
             # unaffected; multi-instance Windows boards keep the old risk.
             return await fn(*args, **kwargs)
-        fd = os.open(_board_lock_path(), os.O_RDWR | os.O_CREAT, 0o644)
-        try:
-            await asyncio.to_thread(fcntl.flock, fd, fcntl.LOCK_EX)
+        async with _board_lock():
             return await fn(*args, **kwargs)
-        finally:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
     return _locked
 
 
@@ -1290,15 +1310,31 @@ async def memory_onboard(params: OnboardInput) -> str:
     if not _load_prj():
         return "No .agent-mem/ found. Run `memory_init`."
 
-    aid, rejoined, agents = _join_agent_session(
-        params.agent_name,
-        params.agent_platform,
-        params.agent_role,
-        params.task_focus,
-    )
+    # Locked: _join_agent_session read-modify-writes agents.json — the same
+    # mutation memory_agent_join takes the board lock for. Two doors onto one
+    # write, and this was the unlocked one, reached by every agent's first
+    # call. Only the join sits inside the lock: the briefing render below
+    # reads memories, digests and tickets, and holding the lock across it
+    # would stall every ticket mutation on the board for the whole render.
+    async with _board_lock():
+        aid, rejoined, agents = _join_agent_session(
+            params.agent_name,
+            params.agent_platform,
+            params.agent_role,
+            params.task_focus,
+        )
     return _format_compact_onboard(params, aid, rejoined, agents)
 
 @mcp.tool(name="memory_write", annotations={"title":"Write Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+# BORROWED LOCK, not the final design. memory_write read-modify-writes
+# memories.json; tmp+rename makes only the swap atomic, not the RMW, so two
+# concurrent writes can lose one. Observed live 2026-07-31: a write timed out
+# and had to be checked with memory_search before retrying. The board lock is
+# scoped to tickets/index.json, so reusing it here serializes memory writes
+# against ticket mutations, which is broader than necessary. Correct fix is a
+# per-file lock inside JsonMemoryStore; do that in the storage refactor
+# (decision 97bef7f13b34) and drop this decorator then.
+@_with_board_lock
 async def memory_write(params: MemoryWriteInput) -> str:
     """Write a memory entry stamped with your agent_name."""
     err = _require_joined(params.agent_name)
