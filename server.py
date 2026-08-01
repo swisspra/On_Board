@@ -506,6 +506,34 @@ def _demote_rejection_warnings(mem: list, ticket_id: str, resolution: str, actor
         changed = True
     return changed
 
+def _demote_prior_handoffs(mem: list, agent_name: str, actor: str) -> int:
+    """Demote an agent's earlier pinned handoffs when it hands off again.
+
+    Only an agent's newest handoff is a live instruction; the ones before it
+    are history. Every handoff surface already selects by memory_type and
+    recency (_latest_handoff_lines, the briefing's LATEST HANDOFF block, the
+    onboard 'last handoff' line) and the pinned lists explicitly exclude
+    handoffs — so `pinned` on a handoff only ever meant 'do not compact me'.
+    Left unbounded it is a permanent hot-slot reservation: 33 handoffs, 17 of
+    them pinned, on a 50-slot board.
+
+    Keyed on agent_name + memory_type, never on the title string.
+
+    FORWARD-ONLY BY DESIGN, no backfill — same rule as
+    _demote_rejection_warnings. Handoffs already on the board stay pinned
+    until their author writes another one, or someone clears them with
+    memory_unpin.
+    """
+    demoted = 0
+    for entry in mem:
+        if entry.get("memory_type") != MemoryType.HANDOFF:
+            continue
+        if entry.get("agent_name") != agent_name or not entry.get("pinned"):
+            continue
+        _unpin_memory_entry(entry, actor, "superseded by a newer handoff")
+        demoted += 1
+    return demoted
+
 def _minutes_ago(ts: object) -> str:
     try:
         return f"{max(0, int((time.time() - float(ts)) // 60))}m"
@@ -1620,6 +1648,8 @@ async def memory_handoff(params: HandoffInput) -> str:
     if params.files_modified: content += "\n## Modified\n" + "\n".join(f"- `{f}`" for f in params.files_modified) + "\n"
     if params.files_created: content += "\n## Created\n" + "\n".join(f"- `{f}`" for f in params.files_created) + "\n"
     mem = _load_mem()
+    # This handoff supersedes the author's previous one; keep one pinned per agent.
+    superseded = _demote_prior_handoffs(mem, params.agent_name, params.agent_name)
     entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": MemoryType.HANDOFF,
              "title": f"Handoff from {params.agent_name}", "content": content,
              "tags": ["handoff"], "related_files": (params.files_modified or [])+(params.files_created or []),
@@ -1630,7 +1660,8 @@ async def memory_handoff(params: HandoffInput) -> str:
         if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
             a["status"] = AgentStatus.HANDED_OFF; a["handed_off_at"] = _now(); break
     _save_agt(agents)
-    return f"🤝 Handoff from `{params.agent_name}` — {len(params.next_steps)} next steps, {len(params.warnings or [])} warnings"
+    note = f" (superseded {superseded} earlier handoff{'s' if superseded != 1 else ''})" if superseded else ""
+    return f"🤝 Handoff from `{params.agent_name}` — {len(params.next_steps)} next steps, {len(params.warnings or [])} warnings{note}"
 
 @mcp.tool(name="memory_get_briefing", annotations={"title":"Get Full Briefing","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_get_briefing(params: BriefingInput) -> str:
@@ -2911,6 +2942,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
 
             # Write handoff memory
             mem = _load_mem()
+            _demote_prior_handoffs(mem, params.agent_name, params.agent_name)
             mem.append(_finalize_memory_entry({
                 "id": _id(), "agent_name": params.agent_name,
                 "memory_type": MemoryType.HANDOFF,
@@ -2924,7 +2956,11 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
                 ),
                 "tags": ["handoff", "ticket", "auto"],
                 "related_files": params.files_changed or [],
-                "priority": 3, "pinned": True,
+                # Unpinned, unlike a hand-written handoff: this is a routing
+                # notice ("a reviewer is needed"), and it stops mattering once
+                # the review lands. Pinning it reserved a hot slot forever —
+                # 21 of the board's 33 handoffs are auto-generated.
+                "priority": 1, "pinned": False,
                 "created_at": _now(), "timestamp": time.time()
             }))
             _save_mem(mem)

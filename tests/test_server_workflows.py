@@ -761,11 +761,22 @@ def test_auto_pinned_system_memories_get_compact_summary(tmp_path):
         fix_instructions="add proof",
     )))
 
-    pinned = [m for m in server._load_mem() if m.get("pinned")]
+    mem = server._load_mem()
+    pinned = [m for m in mem if m.get("pinned")]
 
-    assert len(pinned) == 3
+    # Three auto-pinned writes happen above, but only the rejection warning
+    # stays pinned: the auto-handoff from memory_submit_ticket is a routing
+    # notice and is written unpinned, and writing it supersedes codex-worker's
+    # earlier hand-written handoff. Handoffs are surfaced by recency, never by
+    # `pinned`, so this costs no visibility and frees two hot slots.
+    assert [m["memory_type"] for m in pinned] == ["warning"]
     assert all(m.get("pinned_summary") for m in pinned)
     assert all(len(m["pinned_summary"]) <= server.PINNED_SUMMARY_MAX_CHARS for m in pinned)
+
+    handoffs = [m for m in mem if m["memory_type"] == "handoff"]
+    assert len(handoffs) == 2
+    assert handoffs[0]["unpin_reason"] == "superseded by a newer handoff"
+    assert handoffs[1]["pinned"] is False
 
 
 def test_memory_links_shows_ticket_file_and_agent_linkage(tmp_path):
