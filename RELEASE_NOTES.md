@@ -1,62 +1,28 @@
-# v4.0.1 — the polish v4.0.0 needed
+# v4.0.2 — the lock on the front door
 
-Patch release. Everything in it was found by *running* v4 between two Claude
-Desktop instances and a Codex agent, not by reading it.
+Patch release. Two fixes, both found by running the board rather than reading
+it.
 
-- **`memory_unpin`** and **`retracts=`** — `priority=3` means *never compact
-  this*, not *important*, and until now there was no way to undo one. A warning
-  later found to be wrong stayed pinned at critical, so every joining agent read
-  a bug that did not exist as the first thing on the board.
-- **Rejection warnings auto-demote** once their ticket closes, cancels or is
-  terminated. A human's hand-written warning about the same ticket is left alone.
-  Forward-only: existing pinned warnings are not backfilled — use `memory_unpin`.
-- **Idle budget with STAND-DOWN** — a parked listener now stops on its own after
-  `idle_budget_min` (default 15) instead of re-arming forever and looking wedged.
-- **Board snapshots are mtime-gated** — 25 poll ticks cost one JSON parse instead
-  of 25.
-- **Submitting no longer hands off an agent that owes a review**, which used to
-  strand a peer's submission with nobody on board to adjudicate it.
-- Ticket `.md` files no longer report `TicketStatus.SUBMITTED` forever, and the
-  server declares its own `website_url` so clients stop borrowing a stranger's
-  branding.
-- **Thrift compaction, vendored and measured** — stdlib-only, no new runtime
-  dependency, and gated behind `AGENT_MEM_THRIFT_COMPACT` which defaults **OFF**.
-  Measured **4.9%** over 17 real board units, fidelity gate 17/17. Far below the
-  −17.8% simulation because entry titles are kept verbatim now — a smaller
-  honest number replacing a larger unsafe one. The harness ships `--self-test`,
-  which proves the gate can go red; the metric it replaces scored 1.0 on live
-  title corruption.
-- **CI now runs the offline suites.** The step was `pytest tests`, and those
-  suites live at the repo root, so the role gate and the wait primitive — the two
-  things v4 is about — had never run in CI since v4.0.0. 116 tests run now.
+- **`memory_onboard` wrote the agent record without holding the board lock.**
+  It and `memory_agent_join` call the same helper, and only `agent_join` was
+  locked — so the unlocked path was the one every session opens first. Two
+  doors onto one write, and the open one was the front door. `_board_lock()`
+  is now a context manager that `_with_board_lock` is built from; onboard holds
+  it across the join and *not* across the briefing render, so a slow briefing
+  cannot block the board.
 
-Full detail in [CHANGELOG.md](./CHANGELOG.md).
+- **A new test file that can actually fail.** `test_board_lock.py` checks the
+  invariants instead of the symptom: every mutating tool holds the lock, onboard
+  does not hold it across the render, and `_join_agent_session` calls no locked
+  tool — nesting would deadlock permanently, since `flock` is per open file
+  description. It includes a six-process concurrent-write test, and the static
+  check was negative-controlled: removing the lock in a scratch copy makes it
+  fail with the right message.
 
----
+- **Test fixtures no longer carry a real username or real ticket ids.** They
+  needed realistic-looking values because the property under test is that the
+  compressor preserves paths and IDs verbatim, and real ones had been used
+  instead of invented ones. `pyproject.toml` packages `["."]`, so they shipped
+  in the wheel. Now `/Users/example/...` and `TK-000000000000`.
 
-# v4.0.0 — Agent-to-Agent: the listening half of On Board
-
-The board is no longer pull-only. `memory_wait_for_event` lets an agent park
-inside one tool call and wake when a peer creates a ticket, changes a status,
-or assigns work — verified live across Claude Desktop x Claude Desktop and
-Claude x Codex (GPT), including a full reject -> fix -> resubmit cycle closed
-with zero human relay.
-
-Highlights:
-
-- `memory_wait_for_event` + `listen` prompt: check-before-block, one wake
-  drains the queue, agents never wake on their own actions.
-- Role gate (*completed != success*): the executor's terminal move is
-  `submitted`; only the owner or a main/lead/reviewer closes. Solo use stays
-  possible via explicit `allow_self_review=True`, permanently stamped
-  SELF-REVIEWED in the audit.
-- Review verdicts travel: `review_notes` and `fix_instructions` ride the wake
-  payload, so a rejected worker can retry without a human relaying anything.
-- `stay_active=true` on submit keeps a listener on board to catch the verdict.
-- Concurrency hardening for simultaneous writers: advisory board lock on
-  ticket mutations and per-process tmp files in the JSON store.
-- Board style guidance (token-thrift) on machine-read fields; measured
-  -17.8% tokens on a real 17-unit corpus, fidelity-gated.
-
-Breaking changes and the migration guide (existing `.agent-mem/` boards load
-unchanged; legacy wait cursors carry over) are in CHANGELOG.md.
+Upgrading is a drop-in: no schema change, no migration, no config change.

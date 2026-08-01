@@ -140,8 +140,22 @@ def test_release_materials_match_current_version():
     assert first_header.startswith(f"## v{version}"), (
         f"changelog leads with {first_header!r}, pyproject says {version}")
     assert f"v{version}" in release_notes, f"RELEASE_NOTES.md does not mention v{version}"
-    for expected in ["memory_wait_for_event", "stay_active", "allow_self_review", "reject -> fix -> resubmit", "migration guide", "SELF-REVIEWED"]:
-        assert expected in release_notes
+
+    # The vocabulary check below used to run against RELEASE_NOTES.md, which made
+    # it the same bug this docstring complains about: the version literal was
+    # removed, but six content literals stayed, so every release still had to
+    # hand-edit its own guard. A patch release has no reason to re-describe the
+    # A2A feature set, and padding its notes to satisfy a test is how a gate
+    # starts measuring compliance instead of correctness.
+    #
+    # The real requirement is that this vocabulary stays DOCUMENTED, not that it
+    # appears in whatever shipped last. README plus CHANGELOG is where it lives.
+    # 'reject -> fix -> resubmit' is dropped: it was prose phrasing unique to the
+    # v4.0.0 notes, and asserting on an exact sentence is brittle by construction.
+    docs = (REPO_ROOT / "README.md").read_text(encoding="utf-8") + changelog
+    for expected in ["memory_wait_for_event", "stay_active", "allow_self_review",
+                     "migration guide", "SELF-REVIEWED"]:
+        assert expected in docs, f"{expected!r} is documented nowhere in README or CHANGELOG"
 
 
 def test_uv_install_docs_and_template_are_present():

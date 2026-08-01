@@ -356,7 +356,7 @@ files an audit can read.
 
 ---
 
-## Current status (v4.0.1, July 2026)
+## Current status (v4.0.2, August 2026)
 
 The current local setup is built around one central On Board checkout and one
 project-selected memory folder:

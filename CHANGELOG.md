@@ -1,5 +1,37 @@
 # Changelog
 
+## v4.0.2
+
+Patch release. One concurrency fix and one hygiene fix, both found by running
+the board rather than by reading it.
+
+### Fixed
+
+- **`memory_onboard` wrote `agents.json` without the board lock.** It and
+  `memory_agent_join` both call the same helper, `_join_agent_session`, which
+  read-modify-writes the agent record. Only `agent_join` was decorated with
+  `@_with_board_lock`, so the unlocked path was the one every session opens
+  first. Two doors onto one write, and the open one was the front door.
+
+  `_board_lock()` is now an async context manager and `_with_board_lock` is
+  written in terms of it; the seven existing decorated sites are unchanged.
+  `memory_onboard` holds the lock only across `_join_agent_session`, not across
+  the briefing render, so a slow briefing cannot block the board.
+  `memory_write` borrows the lock with a comment marking that arrangement
+  temporary.
+
+  `test_board_lock.py` encodes the invariants rather than the symptom: every
+  mutating tool holds the lock, onboard must not hold it across the render, and
+  `_join_agent_session` calls no locked tool — nesting would deadlock
+  permanently, because `flock` is per open file description and `_board_lock`
+  opens a fresh descriptor. A six-process concurrent-write test runs for real.
+
+- **Test fixtures carried a real username and two real ticket ids.** The
+  fixtures needed realistic-looking values because the property under test is
+  that the compressor preserves paths and IDs verbatim, and real ones were used
+  instead of invented ones. Since `pyproject.toml` packages `["."]`, they
+  shipped inside the wheel. Now `/Users/example/...` and `TK-000000000000`.
+
 ## v4.0.1
 
 Patch release. Everything here is polish and correction on top of v4.0.0,
