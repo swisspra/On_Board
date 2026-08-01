@@ -76,7 +76,7 @@ def self_test() -> int:
          "- Refactored the database configuration in the deployment environment (`bob`)",
          "- Refactored DB config in deployment env (`bob`)"),
         ("heading rewritten", "# The database configuration", "# DB config"),
-        ("ticket id dropped", "see TK-96e7e9fd1e88 for detail", "see the ticket for detail"),
+        ("ticket id dropped", "see TK-000000000000 for detail", "see the ticket for detail"),
         ("number changed", "saved 17.8% overall", "saved a lot overall"),
     ]
     ok = True

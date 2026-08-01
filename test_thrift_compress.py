@@ -4,13 +4,13 @@ from thrift_compress import compress, compress_digest, fidelity
 def test_fidelity_protected_spans_and_code_fence():
     source = (
         "# Digest\n"
-        "Path /Users/swissp/project/server.py, ticket TK-0a3fae4e4236, "
+        "Path /Users/example/project/server.py, ticket TK-000000000000, "
         "sha f117e2315752e3cbc61b4f376891d7ced5952d2bb69c7a6303b36af1a3e703eb.\n"
         "```python\nvalue = 'the the a an'\n```\n"
     )
     result = compress(source, budget="medium")
-    assert "/Users/swissp/project/server.py" in result
-    assert "TK-0a3fae4e4236" in result
+    assert "/Users/example/project/server.py" in result
+    assert "TK-000000000000" in result
     assert "f117e2315752e3cbc61b4f376891d7ced5952d2bb69c7a6303b36af1a3e703eb" in result
     assert "value = 'the the a an'" in result
     assert fidelity(source, result) == 1.0
