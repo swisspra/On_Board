@@ -844,10 +844,22 @@ def _split_hot_cold(memories: list) -> tuple:
         else:
             cold.append(m)
 
-    # If still too many hot, keep only the most recent MAX_HOT_ENTRIES
+    # If still too many hot, keep only the most recent MAX_HOT_ENTRIES.
+    # Rank: pinned first (never evicted), then entries inside the hot window,
+    # then priority, then recency. Ranking on priority alone demoted brand-new
+    # unpinned entries below week-old priority>=1 handoffs — which is how a
+    # freshly written compaction digest ended up in the cold set and was
+    # archived by the very memory_compact it was written for.
     if len(hot) > MAX_HOT_ENTRIES:
-        # Sort by priority desc then timestamp desc
-        hot.sort(key=lambda m: (m.get("priority", 0), m.get("timestamp", 0)), reverse=True)
+        hot.sort(
+            key=lambda m: (
+                1 if m.get("pinned") else 0,
+                1 if m.get("timestamp", 0) >= cutoff_time else 0,
+                m.get("priority", 0),
+                m.get("timestamp", 0),
+            ),
+            reverse=True,
+        )
         overflow = hot[MAX_HOT_ENTRIES:]
         hot = hot[:MAX_HOT_ENTRIES]
         cold = overflow + cold
