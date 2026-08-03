@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.swisspra/On_Board",
+  "title": "On Board",
+  "description": "Cross-platform shared memory and ticket coordination for AI agents across MCP clients.",
+  "websiteUrl": "https://swisspra.github.io/On_Board/",
+  "icons": [
+    {
+      "src": "https://swisspra.github.io/On_Board/docs/assets/on-board-icon.png",
+      "mimeType": "image/png",
+      "sizes": ["128x128"]
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/swisspra/On_Board",
+    "source": "github",
+    "id": "1212543610"
+  },
+  "version": "4.0.4",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "onboard-memory-mcp",
+      "version": "4.0.4",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AGENT_PROJECT_DIR",
+          "description": "Absolute path to the project that owns the .agent-mem directory.",
+          "format": "filepath",
+          "isRequired": true,
+          "isSecret": false,
+          "placeholder": "/absolute/path/to/project"
+        }
+      ]
+    }
+  ]
+}

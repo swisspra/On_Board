@@ -1,5 +1,7 @@
 # On Board
 
+<!-- mcp-name: io.github.swisspra/On_Board -->
+
 > Shared project memory for agents.
 > One MCP server, one project memory folder, many IDEs and agent clients.
 > **New in v4.0.0:** agents wake each other. The human stops being the message pump.
@@ -356,7 +358,7 @@ files an audit can read.
 
 ---
 
-## Current status (v4.0.3, August 2026)
+## Current status (v4.0.4, August 2026)
 
 The current local setup is built around one central On Board checkout and one
 project-selected memory folder:

@@ -1,45 +1,38 @@
-# v4.0.3 — hot memory stops evicting the newest thing on the board
+# v4.0.4 — terminal tickets leave the open queue
 
-Patch release. Two fixes to the hot/cold tiering, both found by watching the
-board discard entries it had just been told to keep.
+Patch release. Ticket files now agree with the index after cancellation or
+termination, operator-facing counts and messages describe what the tools
+actually show, and On Board is ready for publication to the official MCP
+Registry.
 
-- **The overflow ranking put priority ahead of recency.** `_split_hot_cold`
-  works out `is_recent` for every entry, then throws that decision away: when
-  more entries survive than `AGENT_MEM_MAX_HOT` allows, it re-sorted by
-  `(priority, timestamp)` and truncated. Priority dominates, so a brand-new
-  unpinned `priority: 0` entry sorted below every week-old `priority: 1`
-  handoff and lost its slot.
+- **Canceled and terminated tickets are filed under `tickets/closed/`.** The
+  index already recorded the right terminal state, but the Markdown file stayed
+  in `tickets/`, which is documented as the open queue. New cancel and terminate
+  operations now write the terminal record under `closed/`, remove the open
+  copy, and carry any submission out of `tickets/review/`. The response names
+  the final path.
 
-  That is why compaction ate the digest written for it.
-  `memory_prepare_compaction` asks the agent to summarise the cold set with
-  `memory_write(memory_type='context')`; the digest lands unpinned at priority
-  0, overflow drops it into COLD, and the `memory_compact` it was written for
-  archives it with the entries it summarised. Two agents hit this
-  independently. Nothing was lost — `memory_search_archive` still finds them —
-  but the next agent reads hot first, so a digest in the archive is a digest
-  nobody reads.
+- **The dashboard Tickets badge matches the ticket view.** The badge used to
+  count only open tickets while the page showed every ticket. It now displays
+  the number of rows in that view; open work still controls the hot styling.
 
-  Overflow now ranks `(pinned, in-hot-window, priority, timestamp)`. On a live
-  53-entry board the demoted set went from *[oldest handoff, second-newest
-  entry]* to the three oldest handoffs.
+- **The compaction measurement helper reports an empty cold set honestly.** It
+  now lists every reason an entry can be exempt instead of claiming all entries
+  are pinned or high-priority.
 
-- **Handoffs reserved hot slots forever.** Both writers hardcoded
-  `priority: 3, pinned: True`, so the live board held 33 handoffs — 17 pinned —
-  against 50 slots. But `pinned` on a handoff never meant "show me": every
-  handoff surface selects by `memory_type` and recency, and both pinned lists
-  exclude handoffs outright. It only ever meant "do not compact me".
+- **CI covers the missing root-level regression suites.** Hot/cold ranking,
+  handoff pinning, and board-lock tests now run on every push and pull request.
 
-  `memory_handoff` still pins, but demotes the author's earlier handoffs first,
-  so the board keeps one per agent. The auto-handoff from
-  `memory_submit_ticket` is now `priority: 1` and unpinned: it is a routing
-  notice that expires when the review lands, and 21 of those 33 handoffs were
-  auto-generated.
+- **Fresh installs keep a compatible MCP SDK.** The dependency now excludes
+  MCP SDK 2.x, which removed the `mcp.server.fastmcp` import used by this
+  release. Existing MCP SDK 1.x installations are unaffected.
 
-- **Two new offline test files**, `test_hot_cold_split_offline.py` (6) and
-  `test_handoff_pinning_offline.py` (6). The first was negative-controlled:
-  replayed against v4.0.2's `server.py`, three of its six tests fail.
+- **Official MCP Registry metadata is included.** `server.json` describes the
+  published PyPI package, `stdio` transport, project icon, source repository,
+  and required `AGENT_PROJECT_DIR` filepath. The README carries the hidden PyPI
+  ownership marker. These are discovery and ownership metadata only; they do
+  not change the server's tools or runtime behavior.
 
-Upgrading is a drop-in: no schema change, no migration, no config change. The
-handoff change is forward-only — handoffs already pinned on your board stay
-pinned until their author hands off again, or you clear them with
-`memory_unpin`.
+Upgrading is a drop-in: there is no board schema migration and no new runtime
+dependency. Ticket-file cleanup is forward-only; terminal files left in the
+open queue by an older release are not moved automatically.

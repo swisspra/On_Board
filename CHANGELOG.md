@@ -1,5 +1,48 @@
 # Changelog
 
+## v4.0.4
+
+Patch release. Terminal ticket files now agree with the ticket index, two
+operator-facing messages match the views they describe, and the package carries
+the metadata needed for the official MCP Registry.
+
+### Fixed
+
+- **Canceled and terminated tickets now leave the open queue.** The ticket
+  index already marked these states as terminal, but their Markdown files stayed
+  under `tickets/`, while approved tickets moved to `tickets/closed/`. New
+  cancel and terminate operations now write the terminal record under
+  `tickets/closed/`, remove the open-queue copy, and carry any submission file
+  out of `tickets/review/`. The tool response reports the filed path. This is
+  forward-only: files left behind by earlier releases are not moved
+  automatically.
+
+- **The dashboard Tickets badge now counts the rows in the view it opens.** It
+  previously showed only open tickets while the page listed the complete ticket
+  history. Open tickets still control the badge's hot styling.
+
+- **An empty compaction candidate set is reported accurately.** The measurement
+  helper now says `EMPTY COLD SET` and lists all exemption reasons: pinned,
+  inside `AGENT_MEM_HOT_HOURS`, or within `AGENT_MEM_MAX_HOT`. It no longer
+  implies that every entry is pinned or high-priority.
+
+- **CI now runs all offline regression suites.** The hot/cold ranking, handoff
+  pinning, and board-lock tests were present at the repository root but missing
+  from the enumerated CI command.
+
+- **Clean installs stay on the compatible MCP SDK major version.** The package
+  now declares `mcp[cli]>=1.0.0,<2`; MCP SDK 2.x removed the
+  `mcp.server.fastmcp` import used by this release. Existing 1.x environments
+  are unchanged.
+
+### Changed
+
+- Added the PyPI ownership marker and root `server.json` for the official MCP
+  Registry. The manifest identifies the existing PyPI package and `stdio`
+  transport, and exposes `AGENT_PROJECT_DIR` as a required non-secret filepath.
+  It does not change the MCP protocol, tool behavior, installation model, or
+  runtime command.
+
 ## v4.0.3
 
 Patch release. Two fixes to the hot/cold memory tiering, both found the same

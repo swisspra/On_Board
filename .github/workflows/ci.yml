@@ -43,6 +43,9 @@ jobs:
           test_snapshot_gate_offline.py
           test_idle_budget_offline.py
           test_thrift_compress.py
+          test_hot_cold_split_offline.py
+          test_handoff_pinning_offline.py
+          test_board_lock.py
           -q
 
       - name: Compile Python files
