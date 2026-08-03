@@ -164,9 +164,11 @@ def main() -> int:
         units, origin = from_archive(args.archive), f"archive {args.archive}"
 
     if not units:
-        print(f"NO CORPUS: {origin} yielded 0 measurable units.")
+        print(f"EMPTY COLD SET: {origin} has nothing compaction would touch.")
+        print("  This is a property of the source, not missing coverage here.")
         if args.board:
-            print("  Every entry is pinned or priority>=3, so nothing is compactable.")
+            print("  Every entry is currently exempt — pinned, inside the hot window")
+            print("  (AGENT_MEM_HOT_HOURS), or within the AGENT_MEM_MAX_HOT budget.")
             print("  Measure --archive or --corpus instead; do NOT unpin the board to")
             print("  manufacture a corpus.")
         return 2

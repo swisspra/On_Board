@@ -641,7 +641,7 @@ function derive() {
     recent, roster, agentsFull, agentRows, platforms, platCount:platItems.length, platTop, totalAgents:agentList.length, tickets, ticketRows, flowStages, flowBranch, flowBranchTotal, linkTickets, fileLinks, tags, health,
     hscore, hcolor, hlabel, kpis, timelineGroups, tokenKpis, tokenSegs, tokenTotal:fmt(hot+dig+arc),
     changes, changeKpis, q, a2aNodes, a2aEdges, a2aStats,
-    counts:{ memories:d.memories.length, agents:agentList.length, openTickets, a2aEdges:a2aEdges.length } };
+    counts:{ memories:d.memories.length, agents:agentList.length, openTickets, totalTickets:d.tickets.length, a2aEdges:a2aEdges.length } };
 }
 
 function quota(hours, activeNames) {
@@ -705,7 +705,10 @@ function buildNav(v) {
   document.getElementById('nav').innerHTML = NAV.map(([tab,label,countKey,svg])=>{
     const on = state.tab===tab;
     let badge = '';
-    if (v && countKey) { const n = v.counts[countKey]; const hot = countKey==='openTickets' && n>0; badge = `<span class="badge mono${hot?' hot':''}">${n}</span>`; }
+    // The Tickets badge shows the row count of the view it opens, not the open
+    // subset: it read 3 while the list showed 22, so the nav looked like it was
+    // hiding history. Open count still drives the hot styling.
+    if (v && countKey) { const open = v.counts[countKey]; const n = countKey==='openTickets' ? v.counts.totalTickets : open; const hot = countKey==='openTickets' && open>0; badge = `<span class="badge mono${hot?' hot':''}">${n}</span>`; }
     return `<button class="navbtn${on?' on':''}" data-action="tab" data-arg="${tab}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${svg}</svg><span class="lbl">${label}</span>${badge}</button>`;
   }).join('');
 }

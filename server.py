@@ -3136,6 +3136,29 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     return f"Ticket `{params.ticket_id}` not found."
 
 
+def _retire_ticket_files(ticket: dict) -> str:
+    """Move a terminal ticket out of the open queue and return its new path.
+
+    Approval already did this — memory_review_ticket moves the ticket md and
+    the submission into closed/. Cancel and terminate only rewrote the md in
+    place, so `tickets/`, documented as the open queue, accumulated dead
+    tickets: five of them on the live board, and every cancel re-asserted the
+    file there. The index was right and the directory was wrong, which reads
+    worse than either being wrong alone.
+    """
+    tdir = _tickets_dir()
+    dest = tdir / "closed"
+    dest.mkdir(exist_ok=True)
+    _write_ticket_md(dest / f"{ticket['id']}.md", ticket)
+    stale = tdir / f"{ticket['id']}.md"
+    if stale.exists():
+        stale.unlink()
+    submit = tdir / "review" / f"{ticket['id']}-submit.md"
+    if submit.exists():
+        shutil.move(str(submit), str(dest / submit.name))
+    return f"tickets/closed/{ticket['id']}.md"
+
+
 @mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 @_with_board_lock
 async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
@@ -3161,8 +3184,9 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
             mem = _load_mem()
             if _demote_rejection_warnings(mem, t["id"], "canceled", agent_name):
                 _save_mem(mem)
-            _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
-            return f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
+            path = _retire_ticket_files(t)
+            return (f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis}).\nFiled at `{path}`."
+                    + (f"\nReason: {reason}" if reason else ""))
     return f"Ticket `{ticket_id}` not found."
 
 
@@ -3191,8 +3215,9 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
             mem = _load_mem()
             if _demote_rejection_warnings(mem, t["id"], "terminated", agent_name):
                 _save_mem(mem)
-            _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
-            return f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
+            path = _retire_ticket_files(t)
+            return (f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis}).\nFiled at `{path}`."
+                    + (f"\nReason: {reason}" if reason else ""))
     return f"Ticket `{ticket_id}` not found."
 
 

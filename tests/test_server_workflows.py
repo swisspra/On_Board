@@ -483,6 +483,17 @@ def test_ticket_control_uses_agent_roles_for_stuck_work(tmp_path):
     assert tickets["TK-danger"]["status"] == "terminated"
     assert tickets["TK-danger"]["terminated_by"] == "codex-lead"
 
+    # Both terminal states leave the open queue, the way approval already did.
+    # Cancel and terminate used to rewrite the md in tickets/ and never move it,
+    # so the directory documented as the open queue kept dead tickets and the
+    # next agent's `ls` disagreed with the index.
+    tdir = server._tickets_dir()
+    for ticket_id in ("TK-stuck", "TK-danger"):
+        assert not (tdir / f"{ticket_id}.md").exists()
+        assert (tdir / "closed" / f"{ticket_id}.md").exists()
+    assert "tickets/closed/TK-stuck.md" in canceled
+    assert "tickets/closed/TK-danger.md" in terminated
+
 
 def test_memory_doctor_reports_duplicate_agents_and_orphaned_tickets(tmp_path):
     server = load_server(tmp_path)
