@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  MCP_PUBLISHER_VERSION: v1.8.0
+  MCP_PUBLISHER_LINUX_AMD64_SHA256: 1370446bbe74d562608e8005a6ccce02d146a661fbd78674e11cc70b9618d6cf
+
 jobs:
   release-build:
     runs-on: ubuntu-latest
@@ -18,6 +22,14 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.x"
+
+      - name: Verify release tag matches the package version
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          PACKAGE_VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          test "$RELEASE_TAG" = "v$PACKAGE_VERSION"
 
       - name: Build release distributions
         run: |
@@ -51,3 +63,114 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  mcp-registry-publish:
+    runs-on: ubuntu-latest
+    needs:
+      - pypi-publish
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
+      - name: Resolve the release version
+        id: release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [[ -n "$RELEASE_TAG" ]]; then
+            VERSION=${RELEASE_TAG#v}
+          else
+            VERSION=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          fi
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the release on PyPI
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          for ATTEMPT in {1..30}; do
+            if curl --fail --silent --show-error \
+              "https://pypi.org/pypi/onboard-memory-mcp/$VERSION/json" \
+              -o "$RUNNER_TEMP/pypi-release.json"; then
+              if jq -e --arg VERSION "$VERSION" \
+                '.info.version == $VERSION and
+                 (.info.description | contains("<!-- mcp-name: io.github.swisspra/On_Board -->")) and
+                 (.urls | length > 0)' \
+                "$RUNNER_TEMP/pypi-release.json" > /dev/null; then
+                exit 0
+              fi
+            fi
+            echo "PyPI $VERSION is not ready yet (attempt $ATTEMPT/30)"
+            sleep 10
+          done
+          echo "PyPI $VERSION did not become ready in time" >&2
+          exit 1
+
+      - name: Create the release manifest
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          jq --arg VERSION "$VERSION" \
+            '.version = $VERSION | .packages[0].version = $VERSION' \
+            server.json > "$RUNNER_TEMP/server.json"
+
+      - name: Check Registry version immutability
+        id: registry
+        env:
+          SERVER_NAME: io.github.swisspra/On_Board
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          REGISTRY_HTTP_CODE=$(curl --silent --show-error --location \
+            "https://registry.modelcontextprotocol.io/v0/servers/io.github.swisspra%2FOn_Board/versions/$VERSION" \
+            -o "$RUNNER_TEMP/registry-release.json" \
+            -w '%{http_code}')
+          case "$REGISTRY_HTTP_CODE" in
+            200)
+              jq -e --arg NAME "$SERVER_NAME" --arg VERSION "$VERSION" \
+                '.server.name == $NAME and .server.version == $VERSION' \
+                "$RUNNER_TEMP/registry-release.json" > /dev/null
+              echo "Registry $SERVER_NAME $VERSION already exists; refusing to republish an immutable version."
+              echo "already_published=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "already_published=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Registry version check returned HTTP $REGISTRY_HTTP_CODE" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Install the pinned MCP Publisher
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          ARCHIVE="$RUNNER_TEMP/mcp-publisher.tar.gz"
+          curl --fail --location --retry 3 \
+            "https://github.com/modelcontextprotocol/registry/releases/download/$MCP_PUBLISHER_VERSION/mcp-publisher_linux_amd64.tar.gz" \
+            -o "$ARCHIVE"
+          echo "$MCP_PUBLISHER_LINUX_AMD64_SHA256  $ARCHIVE" | sha256sum --check --status
+          tar -xzf "$ARCHIVE" -C "$RUNNER_TEMP" mcp-publisher
+          chmod +x "$RUNNER_TEMP/mcp-publisher"
+
+      - name: Validate the MCP Registry manifest
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" validate "$RUNNER_TEMP/server.json"
+
+      - name: Authenticate with GitHub OIDC
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" login github-oidc
+
+      - name: Publish to the MCP Registry
+        if: steps.registry.outputs.already_published != 'true'
+        run: |
+          "$RUNNER_TEMP/mcp-publisher" publish "$RUNNER_TEMP/server.json"
