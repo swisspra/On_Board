@@ -315,6 +315,30 @@ else
 fi
 echo ""
 
+# ── Preflight the canonical On Board skill source group ──
+# The skill is deployed as a group (entry + references + helper) whose relative
+# links only resolve when all four files are present. Check the whole source
+# group here, before ANY project write below (including hooks), so a source
+# missing a skill file cannot leave a half-configured project.
+SKILL_DEST_DIR="$PROJECT_DIR/.claude/skills/onboard"
+SKILL_GROUP=(
+    "skills/onboard/SKILL.md"
+    "skills/onboard/references/install.md"
+    "skills/onboard/references/protocol.md"
+    "skills/onboard/scripts/setup.py"
+)
+
+SKILL_MISSING=()
+for rel in "${SKILL_GROUP[@]}"; do
+    [ -f "$SCRIPT_DIR/$rel" ] || SKILL_MISSING+=("$rel")
+done
+if [ ${#SKILL_MISSING[@]} -gt 0 ]; then
+    echo "❌ Cannot deploy the On Board skill: source file(s) missing from $SCRIPT_DIR"
+    printf '   - %s\n' "${SKILL_MISSING[@]}"
+    echo "   No project file was written. Restore the missing file(s) and rerun."
+    exit 1
+fi
+
 # ── 2. Create hook directories in project ──
 HOOKS_DIR="$PROJECT_DIR/.agent-mem-hooks"
 if [ "$HOOK_MODE" = "safe" ]; then
@@ -351,12 +375,54 @@ else
     echo "✅ On Board Codex hooks disabled"
 fi
 
-# ── 2b. Copy SKILL.md to Claude Code skills ──
-SKILL_DIR="$PROJECT_DIR/.claude/skills/agent-memory"
-mkdir -p "$SKILL_DIR"
-if [ -f "$SCRIPT_DIR/SKILL.md" ]; then
-    cp "$SCRIPT_DIR/SKILL.md" "$SKILL_DIR/SKILL.md"
-    echo "✅ SKILL.md copied to .claude/skills/agent-memory/"
+# ── 2b. Deploy the On Board skill into Claude Code skills ──
+# The source group was preflighted before any project write above. The group is
+# copied with its relative references/ and scripts/ paths so the entry's links
+# and helper resolve inside the installed skill. A CLI-managed skill (the whole
+# directory, a references/scripts subdirectory, or an individual file) is a
+# symlink into a shared or external skill: never mkdir/cp through it — leave the
+# group untouched and point the user at the skills CLI instead.
+SKILL_LINKED=0
+for path in \
+    "$PROJECT_DIR/.claude" \
+    "$PROJECT_DIR/.claude/skills" \
+    "$SKILL_DEST_DIR" \
+    "$SKILL_DEST_DIR/references" \
+    "$SKILL_DEST_DIR/scripts"; do
+    if [ -L "$path" ]; then
+        SKILL_LINKED=1
+    fi
+done
+for rel in "${SKILL_GROUP[@]}"; do
+    if [ -L "$SKILL_DEST_DIR/${rel#skills/onboard/}" ]; then
+        SKILL_LINKED=1
+    fi
+done
+
+if [ "$SKILL_LINKED" -eq 1 ]; then
+    echo "⚠️  On Board skill is CLI-managed (symlink); left unchanged: ${SKILL_DEST_DIR#$PROJECT_DIR/}"
+    echo "      Reinstall or update it with: npx skills add swisspra/On_Board --skill onboard"
+else
+    for rel in "${SKILL_GROUP[@]}"; do
+        SKILL_SRC="$SCRIPT_DIR/$rel"
+        SKILL_DST="$SKILL_DEST_DIR/${rel#skills/onboard/}"
+        mkdir -p "$(dirname "$SKILL_DST")"
+        if [ ! -e "$SKILL_DST" ]; then
+            cp "$SKILL_SRC" "$SKILL_DST"
+            echo "✅ Skill file created: ${SKILL_DST#$PROJECT_DIR/}"
+        elif is_same_file "$SKILL_SRC" "$SKILL_DST"; then
+            echo "✅ Skill file already current: ${SKILL_DST#$PROJECT_DIR/}"
+        else
+            echo "⚠️  Skill file exists and differs; left unchanged: ${SKILL_DST#$PROJECT_DIR/}"
+            echo "      Reinstall with: npx skills add swisspra/On_Board --skill onboard, or merge the change."
+        fi
+    done
+fi
+
+LEGACY_SKILL="$PROJECT_DIR/.claude/skills/agent-memory/SKILL.md"
+if [ -f "$LEGACY_SKILL" ]; then
+    echo "⚠️  Legacy skill file remains: ${LEGACY_SKILL#$PROJECT_DIR/}"
+    echo "      It is superseded by .claude/skills/onboard/; remove it after migrating."
 fi
 
 # ── 3. Set up Cursor hooks ──
@@ -886,6 +952,7 @@ echo "  │   ├── codex-session-start.sh"
 echo "  │   └── onboard-mini-brief.py"
 echo "  ├── .cursor/hooks.json      ← Cursor hook config"
 echo "  ├── .claude/settings.json   ← Claude Code hook config"
+echo "  ├── .claude/skills/onboard/ ← On Board skill (SKILL.md + references/ + scripts/)"
 echo "  ├── .cursorrules            ← Rules for Cursor agents"
 echo "  ├── CLAUDE.md               ← Rules for Claude Code agents"
 echo "  ├── AGENTS.md               ← Rules for Codex agents"

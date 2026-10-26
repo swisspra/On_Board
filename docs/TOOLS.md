@@ -84,7 +84,7 @@ Fields:
 Behavior:
 
 - The first call stores your baseline snapshot; every later call diffs against it. The cursor lives in the agent's own watch file, so you carry no bookkeeping — just call the tool again to re-arm.
-- A re-arm after a gap returns the accumulated backlog in 0s instead of waking empty. One wake drains the whole queue.
+- A re-arm after a gap returns the pending snapshot diff in 0s instead of waking empty. It is a diff, not a queue: one wake carries whatever the two snapshots differ by.
 - You never wake on your own actions, so two listeners cannot ping-pong each other.
 - A rejection arrives with the reviewer notes and fix instructions in the wake payload.
 - The idle counter resets only on a real event, never on re-arming. `STAND-DOWN` is a distinct status, not an `idle`, so a loop that keys off `idle` cannot read it as permission to keep going.
@@ -334,6 +334,59 @@ memory_compact()
 ### `memory_search_archive`
 
 Search archived raw memories after compaction.
+
+## Resources
+
+On Board exposes three read-only MCP resources (`application/json`) on a
+verified 4.2+ runtime. They never create or modify a board, and they return
+bounded projections — not raw memory bodies. An existing working 4.1.1 install
+keeps working unchanged and simply does not expose them.
+
+| URI | Contents |
+|---|---|
+| `onboard://project` | Initialized flag plus project description/tech-stack previews |
+| `onboard://tickets` | Whole-board ticket counts plus bounded open items and totals |
+| `onboard://memory/summary` | Memory totals, pinned count, and per-type counts |
+
+Read them with any MCP client that supports resources.
+
+### Cache hints: catalog versus data
+
+Every `resources/read` result is live board state and carries a **private
+`ttlMs 0`** hint — none of the three resources is cacheable, including
+`onboard://project` (the project file is mutable too). Only the static response
+catalogs (`server/discover`, `tools/list`, `prompts/list`, `resources/list`, and
+`resources/templates/list`) carry a private `ttlMs 60000` hint, because they
+change only when the code does. Keep the two apart: the 60000 ms hint applies to
+the catalog listing, never to a resource read.
+
+### Change notifications are capability-dependent
+
+When a client supports resource subscriptions *and* runs in a mode that honors
+them, the server sends a coalesced `ResourceUpdated` invalidation notice for any
+of the three resources. A process-local watcher stats the shared board files
+behind them (`project.json`, `tickets/_index.json`, `memories.json`) every 2
+seconds and publishes an update for each whose fingerprint changed. The scan runs
+only while at least one listener is attached and stops when none is; with no
+listeners there is no stat scan at all.
+
+This is a cache-invalidation hint only. Keep the three layers distinct:
+
+- **Resource invalidation** — "this resource changed; re-read it." Delivered only
+  to clients that subscribed; a client that never subscribed simply re-reads on
+  demand. There is no durable log and no replay.
+- **Cursor-backed (portable) A2A wait** — `memory_wait_for_event` keeps a
+  persisted snapshot cursor in the agent's own watch file, so a re-arm returns the
+  pending snapshot diff instead of waking empty. It is a diff between snapshots,
+  not an event stream: intermediate transitions coalesce and can be missed, and
+  there is no event log or replay. Native resource hints alone do not guarantee a
+  host's model wakes.
+- **Model wake-up** — the listening loop that actually resumes a parked agent
+  when `memory_wait_for_event` returns. Resource notifications do not wake a
+  model; only the wait call resumes agent work.
+
+Use the resources to cheaply refresh context; use `memory_wait_for_event` when an
+agent must be woken by a peer.
 
 ## Minimal agent loop
 

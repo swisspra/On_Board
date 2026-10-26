@@ -1,40 +1,85 @@
-# v4.1.1 — Refreshed dependency locks and accurate install guidance
+# v4.2.0 candidate — Skill-first setup and native MCP context
 
-This maintenance release refreshes the source checkout's locked runtime/test
-environment and corrects the installation guidance shipped in package metadata.
-The MCP SDK remains 2.3.0, with thirty tools, two prompts, and Python 3.10+.
-Runtime APIs and public dependency requirements are unchanged.
+This branch prepares 4.2.0; pushing it does not publish a PyPI package, an MCP
+Registry version, or a GitHub release. PyPI currently provides 4.1.1.
 
-## Dependency refresh
+Install the preview `onboard` skill in the target project:
 
-- Upgrade 22 locked packages to current compatible stable releases, including
-  Pydantic 2.14.1, pydantic-core 2.50.1, Uvicorn 0.54.0, pytest 9.1.1,
-  cffi 2.1.1, Typer 0.27.3, and updated validation/CLI dependencies.
-- Keep explicit Python 3.10 resolver branches where newer upstream versions
-  require Python 3.11 or later. The supported Python minimum is not raised.
-- Retain current MCP/mcp-types 2.3.0, AnyIO 4.15.1, PyJWT 2.15.1, and
-  cryptography 50.0.2. No advisory ignores or security-policy bypasses are added.
+```bash
+npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
+```
 
-## Installation guidance
+Once the changes merge into `main`, the normal install command is:
 
-- Do not promise compiler-free installs independently of Python and architecture;
-  dependency wheel availability varies by platform.
-- Homebrew bottle builds target ARM macOS and x86_64 Linux. Upstream Rust,
-  OpenSSL 3, and Python 3.12 dependency bottles are currently unavailable for
-  Intel macOS, so Homebrew is not a compiler-free fallback there.
-- The platform-independent PyPI package remains available. Source builds may
-  require a C/Rust toolchain when a dependency has no matching wheel.
+```bash
+npx skills add swisspra/On_Board --skill onboard
+```
 
-## Verification and upgrade
+`npx` runs the skills CLI from npm; On Board's skill is distributed from Git.
+No separate On Board npm package is required.
 
-The upgraded graph passed the full 184-test warning-strict suite on Python 3.10
-and 3.13, native scratch-board A2A checks (33/33 each), and multiprocess checks
-preserving every one of 36 writes on each interpreter. Complete third-party
-runtime/test advisory audits cover 42 installed packages on 3.10 and 40 on 3.13,
-with zero known vulnerabilities. Release builds also check archives and exercise
-fresh wheel-only installs outside the checkout.
+Reload the agent, then ask:
 
-Upgrade through your existing installation channel. Source-checkout users pick
-up the new lock through the existing update workflow. This release does not
-rewrite 4.1.0, migrate board data, refresh linked projects, or change global
-configuration automatically.
+```text
+Using /onboard, set up On Board for this project. Keep existing memory and other MCP servers unchanged.
+```
+
+## One project, one selected client, one shared runtime
+
+The skill reuses a working runtime or provisions one through an existing
+supported package manager. It merges the selected project's Claude Code,
+Cursor, or Codex entry, preserving other servers and existing memory. Client
+trust/restart is distinct from installing the skill; configuration alone is not
+proof of a live connection. Starting work and initializing memory require a
+separate explicit request.
+
+The skills CLI requires Node.js 22.20+. The native-configuration helper requires
+Python 3.11+, or a one-time Python 3.12 invocation through uv. The MCP runtime
+remains Python 3.10+ on the existing MCP 2.3 dependency line.
+
+## Native read surfaces
+
+- `onboard://project` — bounded project description and tech-stack previews.
+- `onboard://tickets` — whole-board counts and at most 50 open ticket summaries.
+- `onboard://memory/summary` — memory/type/pin counts and at most 10 entry summaries.
+
+All return JSON without initializing a board or returning raw memory bodies.
+Static catalogs are privately cacheable for 60 seconds; all resource reads have
+private zero-TTL hints.
+
+Subscription-capable clients receive coalesced invalidation hints when shared
+files change. They re-listen and refetch after reconnecting; there is no replay
+or model-wake guarantee. Existing `memory_wait_for_event`, its persisted snapshot
+cursor, role checks, idle budgets, and heartbeat locking are unchanged. No MCP
+App or external A2A bridge is introduced.
+
+## Distribution and upgrades
+
+Wheels and sdists contain both native runtime modules, not the Git-distributed
+skill or private project state. Source updates preserve the canonical skill
+layout needed to set up another project and reject skill-only update targets.
+The `--version` command reports installed package identity and exits before
+starting stdio service.
+
+After merge, update the skill with `npx skills update -p onboard`; while testing
+the preview, rerun its branch-pinned install command. Runtime upgrades remain
+separate and manager-matched. Preserve a working 4.1.1/source setup unless its
+replacement is explicitly requested. Native resources require a verified 4.2+
+runtime; a skill-only update does not add them to an older runtime.
+
+For an explicit unreleased-runtime trial, use the
+[optional source preview](docs/SETUP.md#preview-runtime-from-source-optional).
+Do not replace a working shared runtime merely because the skill was updated.
+
+## Safety and verification boundaries
+
+The setup helper refuses tracked/conflicting configuration and indeterminate
+Git tracking or ignore queries before writing. Existing unrelated servers,
+Codex model/provider settings, and memory remain untouched.
+
+Installed-wheel verification exercises real stdio in modern and legacy modes,
+read-only uninitialized resources, an external-process atomic write followed by
+subscription/refetch, reconnect/current-state refetch, package identity, and
+ordinary EOF shutdown. These checks use synthetic projects, not a real board.
+Native UI trust/restart and model wake-up remain host-dependent; configuration
+alone is not Ready. No new Windows multi-writer guarantee is made.

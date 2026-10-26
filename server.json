@@ -16,13 +16,13 @@
     "source": "github",
     "id": "1212543610"
   },
-  "version": "4.1.1",
+  "version": "4.2.0",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "onboard-memory-mcp",
-      "version": "4.1.1",
+      "version": "4.2.0",
       "transport": {
         "type": "stdio"
       },

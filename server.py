@@ -15,22 +15,25 @@ Design principles:
 Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
-import json, os, time, secrets, math, re, base64
+import argparse, json, os, time, secrets, math, re, base64
 import asyncio, functools, contextlib
 try:
     import fcntl                      # POSIX only
 except ImportError:                   # Windows: no fcntl; degrade gracefully
     fcntl = None
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version as _package_version
 from typing import Optional, List
 from enum import Enum
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ConfigDict
-from mcp.server import MCPServer
+from mcp.server import CacheHint, MCPServer
 from mcp_types import Icon, ToolAnnotations
 
 import a2a_wait
+import board_resources
+import board_subscriptions
 import ticket_roles
 from thrift_compress import compress_digest as _thrift_compress_digest
 
@@ -141,7 +144,46 @@ def _server_icons():
                  mime_type="image/png", sizes=["128x128"])]
 
 
-mcp = MCPServer("onboard_memory_mcp", website_url=_HOMEPAGE, icons=_server_icons())
+def _runtime_version() -> str:
+    """The installed package version, or "development" for a source checkout.
+
+    Only absent metadata falls back: a stale installed version is still the
+    truth about what this process is running, and claiming a release the code
+    is not is worse than saying nothing.
+    """
+    try:
+        return _package_version("onboard-memory-mcp")
+    except PackageNotFoundError:
+        return "development"
+
+
+# Static catalogs change only with the code, so a client may hold them briefly.
+# Board reads are live state and must never be served from a cache: TTL 0 keeps
+# every `resources/read` a real read.
+_CACHE_HINTS = {
+    "server/discover": CacheHint(ttl_ms=60_000, scope="private"),
+    "tools/list": CacheHint(ttl_ms=60_000, scope="private"),
+    "prompts/list": CacheHint(ttl_ms=60_000, scope="private"),
+    "resources/list": CacheHint(ttl_ms=60_000, scope="private"),
+    "resources/templates/list": CacheHint(ttl_ms=60_000, scope="private"),
+    "resources/read": CacheHint(ttl_ms=0, scope="private"),
+}
+
+# One bus per server process. It watches the shared .agent-mem/ files and
+# publishes ResourceUpdated to this process's own listeners; every stdio
+# process observes the same files independently, with no daemon or network
+# bridge in between. Nothing starts until the server lifespan runs.
+_SUBSCRIPTIONS = board_subscriptions.BoardSubscriptionBus(MEMORY_DIR)
+
+mcp = MCPServer(
+    "onboard_memory_mcp",
+    website_url=_HOMEPAGE,
+    icons=_server_icons(),
+    version=_runtime_version(),
+    cache_hints=_CACHE_HINTS,
+    subscriptions=_SUBSCRIPTIONS,
+    lifespan=_SUBSCRIPTIONS.lifespan,
+)
 
 # ── Enums ───────────────────────────────────────────────
 class MemoryType(str, Enum):
@@ -237,6 +279,10 @@ class JsonMemoryStore:
         return self.memory_dir / name
 
 STORE = JsonMemoryStore(PROJECT_ROOT)
+
+# Read-only native resources. Registered after STORE so the callbacks read
+# through the same store boundary the tools use; registration touches no files.
+board_resources.register_resources(mcp, store=STORE, memory_dir=MEMORY_DIR)
 
 
 # ── Board lock — serializes ticket-index mutations ──────
@@ -3657,6 +3703,18 @@ def prompt_on_board(agent_name: str = "claude", agent_platform: str = "claude-de
 
 
 def main() -> None:
+    """stdio entry point. `--version` prints and exits before the server starts.
+
+    Unknown arguments are ignored rather than rejected: the stdio launchers
+    forward whatever the client passed, and a server that refuses to start over
+    an argument it does not use is worse than one that starts.
+    """
+    parser = argparse.ArgumentParser(
+        prog="onboard-memory-mcp",
+        description="On Board shared-memory MCP server (stdio).",
+    )
+    parser.add_argument("--version", action="version", version=f"onboard-memory-mcp {_runtime_version()}")
+    parser.parse_known_args()
     mcp.run()
 
 

@@ -193,9 +193,6 @@ is_onboard_target() {
     if [ -f "$dest/server.py" ] && grep -q "onboard_memory_mcp" "$dest/server.py" && grep -q "On Board" "$dest/server.py"; then
         return 0
     fi
-    if [ -f "$dest/SKILL.md" ] && grep -q "On Board" "$dest/SKILL.md" && grep -q "agent-memory" "$dest/SKILL.md"; then
-        return 0
-    fi
     return 1
 }
 
@@ -275,14 +272,21 @@ if [ ${#TARGETS[@]} -eq 0 ]; then
 fi
 
 # ── Mandatory deployment payload ──
-# Every deployed copy needs these to import and render; check them before the
-# first destination file is overwritten so a broken source cannot half-deploy.
+# Every deployed copy needs these to import, render, and configure another
+# project (the canonical skill group). Check them before the first destination
+# file is overwritten so a broken source cannot half-deploy.
 MANDATORY_FILES=(
     "server.py"
     "a2a_wait.py"
     "ticket_roles.py"
     "thrift_compress.py"
+    "board_resources.py"
+    "board_subscriptions.py"
     "docs/assets/on-board-icon.png"
+    "skills/onboard/SKILL.md"
+    "skills/onboard/references/install.md"
+    "skills/onboard/references/protocol.md"
+    "skills/onboard/scripts/setup.py"
 )
 
 MISSING_MANDATORY=()
@@ -318,7 +322,7 @@ for DEST in "${TARGETS[@]}"; do
 
     if ! is_onboard_target "$DEST"; then
         echo "   ❌ Not an On Board checkout — skipping to avoid overwriting unrelated files"
-        echo "      Expected pyproject.toml name=onboard-memory-mcp or On Board markers in server.py/SKILL.md"
+        echo "      Expected pyproject.toml name=onboard-memory-mcp or On Board markers in server.py"
         continue
     fi
 
@@ -329,10 +333,20 @@ for DEST in "${TARGETS[@]}"; do
     copy_file_if_present "$SCRIPT_DIR/a2a_wait.py" "$DEST/a2a_wait.py"
     copy_file_if_present "$SCRIPT_DIR/ticket_roles.py" "$DEST/ticket_roles.py"
     copy_file_if_present "$SCRIPT_DIR/thrift_compress.py" "$DEST/thrift_compress.py"
+    copy_file_if_present "$SCRIPT_DIR/board_resources.py" "$DEST/board_resources.py"
+    copy_file_if_present "$SCRIPT_DIR/board_subscriptions.py" "$DEST/board_subscriptions.py"
     copy_file_if_present "$SCRIPT_DIR/pyproject.toml" "$DEST/pyproject.toml"
     copy_file_if_present "$SCRIPT_DIR/uv.lock" "$DEST/uv.lock"
     copy_file_if_present "$SCRIPT_DIR/dashboard_live.py" "$DEST/dashboard_live.py"
-    copy_file_if_present "$SCRIPT_DIR/SKILL.md" "$DEST/SKILL.md"
+    # The canonical skill sources live under skills/onboard/ in the runtime
+    # checkout, keeping their relative references/ and scripts/ paths, so an
+    # updated runtime can set up another project. Only setup-project.sh deploys
+    # a project's .claude/skills/onboard; update.sh must not create runtime-local
+    # client state (it would also break doctor.sh --self hygiene).
+    copy_file_if_present "$SCRIPT_DIR/skills/onboard/SKILL.md" "$DEST/skills/onboard/SKILL.md"
+    copy_file_if_present "$SCRIPT_DIR/skills/onboard/references/install.md" "$DEST/skills/onboard/references/install.md"
+    copy_file_if_present "$SCRIPT_DIR/skills/onboard/references/protocol.md" "$DEST/skills/onboard/references/protocol.md"
+    copy_file_if_present "$SCRIPT_DIR/skills/onboard/scripts/setup.py" "$DEST/skills/onboard/scripts/setup.py"
     copy_file_if_present "$SCRIPT_DIR/AGENT_SETUP.md" "$DEST/AGENT_SETUP.md"
     copy_file_if_present "$SCRIPT_DIR/setup-project.sh" "$DEST/setup-project.sh"
     chmod +x "$DEST/setup-project.sh" 2>/dev/null || true

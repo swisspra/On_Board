@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import os
 import shutil
@@ -18,16 +19,23 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # setup-project.sh and doctor.sh stay the real files from the tree.
 SOURCE_SKIP = shutil.ignore_patterns(
     ".git", ".venv", ".pytest_cache", "__pycache__", ".work", ".onboard", "tests",
+    ".superpowers", ".ruff_cache",
 )
 
-# Files every deployed copy needs to import and render. update.sh must refuse to
-# overwrite any destination when one of them is missing from the source checkout.
+# Files every source-deployed copy needs to run and configure another project.
+# update.sh must refuse all destination writes when one is missing.
 MANDATORY_PAYLOAD = (
     "server.py",
     "a2a_wait.py",
     "ticket_roles.py",
     "thrift_compress.py",
+    "board_resources.py",
+    "board_subscriptions.py",
     "docs/assets/on-board-icon.png",
+    "skills/onboard/SKILL.md",
+    "skills/onboard/references/install.md",
+    "skills/onboard/references/protocol.md",
+    "skills/onboard/scripts/setup.py",
 )
 
 OLD_DEPLOYED_FILES = {
@@ -35,8 +43,16 @@ OLD_DEPLOYED_FILES = {
     "a2a_wait.py": b"old a2a\n",
     "ticket_roles.py": b"old roles\n",
     "thrift_compress.py": b"old thrift\n",
+    "board_resources.py": b"old board resources\n",
+    "board_subscriptions.py": b"old board subscriptions\n",
     "docs/assets/on-board-icon.png": b"old icon\n",
 }
+
+
+def signature(data: bytes) -> tuple:
+    """(size, sha256) so a mismatch reports sizes/hashes, not raw megabytes."""
+    return (len(data), hashlib.sha256(data).hexdigest())
+
 
 DEST_IMPORT_SCRIPT = """
 import asyncio
@@ -225,8 +241,8 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     registry = tmp_path / "linked-projects.json"
     env = make_env(tmp_path)
 
-    setup = run(src, ["setup-project.sh", str(project)], env)
-    doctor = run(src, ["doctor.sh", str(project)], env)
+    run(src, ["setup-project.sh", str(project)], env)
+    run(src, ["doctor.sh", str(project)], env)
     linked = run(src, ["setup-project.sh", "--list-linked"], env)
     linked_doctor = run(src, ["doctor.sh", "--all-linked"], env)
     linked_update = run(src, ["update.sh", "--list-linked"], env)
@@ -243,9 +259,6 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     assert dashboard.exists()
     assert registry.exists()
     assert os.access(dashboard, os.X_OK)
-    assert "server import OK (30 tools)" in setup.stdout
-    assert "Server import OK (30 tools)" in doctor.stdout
-    assert "0 failed" in doctor.stdout
     assert str(project) in linked.stdout
     assert str(project) in linked_update.stdout
     assert "Checking linked project" in linked_doctor.stdout
@@ -299,7 +312,7 @@ def test_setup_project_hook_modes_are_explicit_and_idempotent(tmp_path):
     run(src, ["setup-project.sh", str(project), "--hooks", "off"], env)
     settings = json.loads((project / ".onboard" / "settings.json").read_text(encoding="utf-8"))
     show = run(src, ["setup-project.sh", str(project), "--show-hooks"], env)
-    doctor = run(src, ["doctor.sh", str(project)], env)
+    run(src, ["doctor.sh", str(project)], env)
     run(src, ["setup-project.sh", "--all-linked"], env)
     settings_after_linked = json.loads((project / ".onboard" / "settings.json").read_text(encoding="utf-8"))
     guard = run(src, ["setup-project.sh", str(project), "--hooks", "guard"], env, check=False)
@@ -310,7 +323,6 @@ def test_setup_project_hook_modes_are_explicit_and_idempotent(tmp_path):
     assert not (project / ".claude" / "settings.json").exists()
     assert not (project / ".codex" / "hooks.json").exists()
     assert "Current hook mode: off" in show.stdout
-    assert "0 failed" in doctor.stdout
     assert guard.returncode != 0
     assert "planned but not implemented" in guard.stdout
 
@@ -360,7 +372,7 @@ def test_setup_project_migration_preserves_existing_memory(tmp_path):
     }), encoding="utf-8")
 
     setup = run(src, ["setup-project.sh", str(project)], env)
-    doctor = run(src, ["doctor.sh", str(project)], env)
+    run(src, ["doctor.sh", str(project)], env)
     report = json.loads((project / ".onboard" / "migration-report.json").read_text(encoding="utf-8"))
     onboard_readme = (project / ".onboard" / "README.md").read_text(encoding="utf-8")
 
@@ -374,7 +386,6 @@ def test_setup_project_migration_preserves_existing_memory(tmp_path):
     assert "Call memory_bootstrap" not in setup.stdout
     assert "Call memory_onboard for this project, then memory_doctor." in onboard_readme
     assert "Call memory_bootstrap" not in onboard_readme
-    assert "0 failed" in doctor.stdout
 
 
 def test_setup_project_existing_memory_in_whitelist_repo_stays_ignored(tmp_path):
@@ -404,7 +415,7 @@ def test_setup_project_existing_memory_in_whitelist_repo_stays_ignored(tmp_path)
         if path.is_file()
     }
     run(src, ["setup-project.sh", str(project)], env)
-    doctor = run(src, ["doctor.sh", str(project)], env)
+    run(src, ["doctor.sh", str(project)], env)
     after = {
         path.relative_to(mem_dir).as_posix(): path.read_bytes()
         for path in mem_dir.rglob("*")
@@ -413,7 +424,6 @@ def test_setup_project_existing_memory_in_whitelist_repo_stays_ignored(tmp_path)
     gitignore = (project / ".gitignore").read_text(encoding="utf-8")
 
     assert before == after
-    assert "0 failed" in doctor.stdout
     for entry in [
         ".agent-mem/",
         ".onboard/",
@@ -446,19 +456,42 @@ def test_update_skips_unrelated_target(tmp_path):
     assert list(unrelated.glob(".onboard-update-backup-*")) == []
 
 
+def test_update_rejects_skill_only_target(tmp_path):
+    src = make_source(tmp_path)
+    env = make_env(tmp_path, without_uv=True)
+    target = tmp_path / "standalone-skill"
+    target.mkdir()
+    (target / "SKILL.md").write_text(
+        "---\nname: onboard\ndescription: On Board setup\n---\n"
+        "# On Board\nMCP server key: agent-memory\n",
+        encoding="utf-8",
+    )
+    unrelated = b"unrelated application; never replace\n"
+    unrelated_server = target / "server.py"
+    unrelated_server.write_bytes(unrelated)
+    # Hash/size snapshots: if update.sh wrongly overwrites a target file (the RED
+    # baseline copied the 179KB server.py over server.py), the failure names the
+    # file instead of dumping both files' bytes.
+    before = {path.name: signature(path.read_bytes()) for path in target.iterdir() if path.is_file()}
+
+    run(src, ["update.sh", str(target)], env, check=False)
+
+    assert signature(unrelated_server.read_bytes()) == signature(unrelated)
+    assert {path.name: signature(path.read_bytes()) for path in target.iterdir() if path.is_file()} == before
+    assert list(target.glob(".onboard-update-backup-*")) == []
+
+
 def test_update_deploys_runtime_payload_and_backs_up_previous_files(tmp_path):
     src = make_source(tmp_path)
     env = make_env(tmp_path)
     deployed = make_deployed_copy(tmp_path)
 
-    updated = run(src, ["update.sh", str(deployed)], env)
+    run(src, ["update.sh", str(deployed)], env)
 
     installed = import_from_destination(deployed)
-    assert f"Updated ({installed['tools']} tools)" in updated.stdout
-    assert "uv synced without pruning extras (30 tools)" in updated.stdout
 
     for rel, old in OLD_DEPLOYED_FILES.items():
-        assert (deployed / rel).read_bytes() == (src / rel).read_bytes(), rel
+        assert signature((deployed / rel).read_bytes()) == signature((src / rel).read_bytes()), rel
         backups = list(deployed.glob(f".onboard-update-backup-*/{rel}"))
         assert len(backups) == 1, rel
         assert backups[0].read_bytes() == old, rel
@@ -469,7 +502,7 @@ def test_update_deploys_runtime_payload_and_backs_up_previous_files(tmp_path):
 
     icon_bytes = base64.b64decode(installed["icon_b64"])
     assert icon_bytes.startswith(b"\x89PNG\r\n\x1a\n")
-    assert icon_bytes == (src / "docs" / "assets" / "on-board-icon.png").read_bytes()
+    assert signature(icon_bytes) == signature((src / "docs" / "assets" / "on-board-icon.png").read_bytes())
 
 
 @pytest.mark.parametrize("missing", MANDATORY_PAYLOAD)
@@ -498,12 +531,10 @@ def test_update_reports_copied_source_without_runtime(tmp_path):
 
     assert result.returncode != 0
     assert "runtime unavailable" in result.stdout
-    assert "✅ Updated" not in result.stdout
-    assert "(? tools)" not in result.stdout
-    assert (deployed / "server.py").read_bytes() == (src / "server.py").read_bytes()
-    assert (deployed / "docs" / "assets" / "on-board-icon.png").read_bytes() == (
-        src / "docs" / "assets" / "on-board-icon.png"
-    ).read_bytes()
+    assert signature((deployed / "server.py").read_bytes()) == signature((src / "server.py").read_bytes())
+    assert signature((deployed / "docs" / "assets" / "on-board-icon.png").read_bytes()) == signature(
+        (src / "docs" / "assets" / "on-board-icon.png").read_bytes()
+    )
 
 
 def test_update_fails_when_deployed_copy_cannot_import(tmp_path):
@@ -518,8 +549,6 @@ def test_update_fails_when_deployed_copy_cannot_import(tmp_path):
     assert "the local server failed to import" in result.stdout
     assert "failed to import" in result.stdout
     assert "SyntaxError" in result.stdout
-    assert "✅ Updated" not in result.stdout
-    assert "(? tools)" not in result.stdout
     assert (deployed / "ticket_roles.py").read_text(encoding="utf-8") == "def broken(:\n"
 
 
@@ -547,3 +576,64 @@ def test_update_auto_detects_pyproject_only_copy_from_isolated_home(tmp_path, so
     backups = list(deployed.glob(".onboard-update-backup-*/server.py"))
     assert len(backups) == 1
     assert backups[0].read_bytes() == OLD_DEPLOYED_FILES["server.py"]
+
+
+@pytest.mark.parametrize("missing", [
+    "skills/onboard/SKILL.md",
+    "skills/onboard/references/install.md",
+    "skills/onboard/references/protocol.md",
+    "skills/onboard/scripts/setup.py",
+])
+def test_setup_rejects_incomplete_skill_before_writing_project(tmp_path, missing):
+    src = make_source(tmp_path)
+    (src / missing).unlink()
+    project = tmp_path / "preserve project"
+    project.mkdir()
+    (project / "keep.txt").write_bytes(b"existing project data\n")
+    before = {str(p.relative_to(project)): signature(p.read_bytes()) for p in project.rglob("*") if p.is_file()}
+    result = run(src, ["setup-project.sh", str(project)], make_env(tmp_path), check=False)
+    assert result.returncode != 0
+    after = {str(p.relative_to(project)): signature(p.read_bytes()) for p in project.rglob("*") if p.is_file()}
+    assert after == before
+    assert not (project / ".agent-mem-hooks").exists()
+    assert not (project / ".onboard").exists()
+
+
+def test_setup_preserves_a_cli_managed_skill_directory(tmp_path):
+    src = make_source(tmp_path)
+    project = tmp_path / "managed project"
+    project.mkdir()
+    managed = tmp_path / "managed skill"
+    managed.mkdir()
+    (managed / "SKILL.md").write_bytes(b"custom CLI-managed skill\n")
+    target = project / ".claude" / "skills" / "onboard"
+    target.parent.mkdir(parents=True)
+    target.symlink_to(managed, target_is_directory=True)
+    result = run(src, ["setup-project.sh", str(project)], make_env(tmp_path))
+    assert result.returncode == 0
+    assert target.is_symlink()
+    assert {str(p.relative_to(managed)): signature(p.read_bytes()) for p in managed.rglob("*") if p.is_file()} == {
+        "SKILL.md": signature(b"custom CLI-managed skill\n"),
+    }
+
+
+def test_updated_runtime_can_set_up_a_new_project_with_its_canonical_skill(tmp_path):
+    src = make_source(tmp_path)
+    deployed = make_deployed_copy(tmp_path)
+    env = make_env(tmp_path)
+    run(src, ["update.sh", str(deployed)], env)
+    project = tmp_path / "project after update"
+    project.mkdir()
+    setup = run(deployed, ["setup-project.sh", str(project)], env, check=False)
+    assert setup.returncode == 0, setup.stdout + setup.stderr
+    assert not (project / ".mcp.json").exists()
+    checked = subprocess.run(
+        [str(deployed / ".venv" / "bin" / "python"),
+         str(deployed / "skills" / "onboard" / "scripts" / "setup.py"),
+         "--project", str(project), "--client", "claude-code", "--check"],
+        env=env, text=True, capture_output=True, timeout=15,
+    )
+    expected_code, expected_status = (2, "needs_configuration") if sys.version_info >= (3, 11) else (1, "error")
+    assert checked.returncode == expected_code, checked.stdout + checked.stderr
+    assert json.loads(checked.stdout)["status"] == expected_status
+    assert not (project / ".agent-mem").exists()

@@ -1,220 +1,114 @@
 # On Board Agent Setup Guide
 
-Use this file when a user asks an agent to help install or explain On Board.
-
-## What This Is
-
-On Board is a shared memory MCP server for multi-agent project work.
-
-Install On Board once in one central folder. Each project points to that same
-On Board folder, but gets its own memory through `AGENT_PROJECT_DIR`.
-
-Project memory lives in:
-
-```text
-<project>/.agent-mem/
-```
-
-Local generated setup files live in:
-
-```text
-<project>/.onboard/
-```
-
-## Safe Setup Flow
-
-Ask the user for the target project path, then run:
-
-```bash
-cd /path/to/On_Board
-bash setup-project.sh /path/to/project
-bash doctor.sh /path/to/project
-```
-
-`setup-project.sh`:
-
-- Runs `uv sync --inexact` for the central On Board checkout
-- Creates or updates project rules and session-start hooks
-- Generates MCP config at `<project>/.onboard/mcp.generated.json`
-- Generates agent setup control at `<project>/.onboard/AGENT_CONTROL.md`
-- Generates a dashboard launcher at `<project>/.onboard/run-dashboard.sh`
-- Registers the project in `<On_Board>/.onboard/linked-projects.json`
-- If `<project>/.agent-mem/` already exists, verifies core memory files are
-  unchanged and writes `<project>/.onboard/migration-report.json`
-- Does not initialize memory content
-- Does not write, move, or delete `.agent-mem/`
-
-`doctor.sh`:
-
-- Read-only
-- Checks the central runtime
-- Checks generated MCP config paths
-- Checks project rules and hooks
-- Reports the next step
-
-For the On Board source repo itself, use:
-
-```bash
-bash doctor.sh --self
-```
-
-This checks that public source contains only templates/source files, not
-project-generated runtime folders. Do not run `setup-project.sh` with the On
-Board checkout as the target project.
-
-Linked project helpers:
-
-```bash
-bash setup-project.sh --list-linked
-bash doctor.sh --list-linked
-bash update.sh --list-linked
-```
-
-To refresh all registered projects after updating On Board:
-
-```bash
-bash update.sh --refresh-linked
-```
-
-This preserves each project's last registered hook mode. Do not override hook
-mode for all projects unless the user explicitly asks.
-
-The linked-project registry is local and gitignored. Do not commit it.
-
-## MCP Client Step
-
-Tell the user to use this generated config as the source for their MCP client:
-
-```text
-<project>/.onboard/mcp.generated.json
-```
-
-Some clients can use the JSON directly. Some clients require merging it into a
-client-specific settings file or adding it through a CLI.
-
-Do not silently edit global Claude, Cursor, Codex, Windsurf, VS Code, or
-Antigravity config files unless the user explicitly asks for that.
-
-If the user asks how to inspect or change On Board setup later, point their
-agent to:
-
-```text
-<project>/.onboard/AGENT_CONTROL.md
-```
-
-## Manual Setup Alternative
-
-If the user does not want to run the setup script:
-
-```bash
-cd /path/to/On_Board
-uv sync --inexact
-```
-
-Then ask them to add this MCP server manually:
-
-```json
-{
-  "mcpServers": {
-    "agent-memory": {
-      "command": "python3",
-      "args": ["/path/to/On_Board/onboard_server.py"],
-      "env": {
-        "AGENT_PROJECT_DIR": "/path/to/project"
-      }
-    }
-  }
-}
-```
-
-## First Agent Step
-
-After the MCP client restarts and On Board tools are visible, tell the agent to
-run one of these flows.
-
-Existing project with `.agent-mem/` already present:
-
-```text
-memory_onboard(...)
-memory_doctor()
-```
-
-New or empty project:
-
-```text
-memory_bootstrap(...)
-memory_onboard(...)
-```
-
-Use `memory_init(...)` instead of `memory_bootstrap(...)` only when the user
-wants a blank manual init. Do not bootstrap an existing-memory project just
-because setup was regenerated.
-
-Use a specific `agent_role` when onboarding:
-
-```text
-main, lead, planner, worker, tester, reviewer, reporter, subagent, utility
-```
-
-Use `main`, `lead`, or `reviewer` only for agents that should coordinate or
-resolve stuck tickets.
-
-## Dashboard
-
-After project memory exists, the user can run:
-
-```bash
-bash /path/to/project/.onboard/run-dashboard.sh
-```
-
-The launcher points back to the central On Board checkout, so projects do not
-need their own dashboard copy.
-
-## Important Runtime Rule
-
-Use `uv sync --inexact` for install/update. `--inexact` avoids pruning already
-installed dev/test extras from `.venv`. Use the tracked launcher for MCP runtime:
-
-```text
-python3 /path/to/On_Board/onboard_server.py
-```
-
-The launcher normally execs `.venv/bin/python server.py`. If `.venv` is missing
-after a clone/update/cleanup, it runs `uv sync --inexact` once and then starts
-the server.
-
-Do not use `uvx` or `uv run` as the default daily MCP startup command when the
-user has many local MCP servers. It can be slow enough to trigger client startup
-timeouts.
-
-## Important Hook Rule
-
-Do not use turn-scoped `Stop` / end-turn hooks to write memory or mark agents
-inactive. Current Claude Code and Codex `Stop` hooks run every turn, so writing
-memory there creates noise and marking agents KIA forces repeated onboarding.
-
-Use session-start hooks only for lightweight context. Agents should write memory
-intentionally with `memory_write`, `memory_checkpoint`, `memory_handoff`, and the
-ticket tools.
-
-## If Something Fails
-
-If `doctor.sh` fails, follow its `Next:` section. Do not blindly rerun setup:
-existing MCP configs and hook files may require manual cleanup because
-`setup-project.sh` intentionally does not overwrite custom files.
-
-After cleanup, verify again:
-
-```bash
-bash /path/to/On_Board/doctor.sh /path/to/project
-```
-
-If the MCP client still cannot see tools, check that its config uses:
-
-```text
-command = python3
-args    = /path/to/On_Board/onboard_server.py
-env     = AGENT_PROJECT_DIR=/path/to/project
-```
-
-Then restart the client.
+Use this file when a user asks an agent to help install or explain On Board. It
+is a pointer to the canonical setup, not a second setup recipe: install the skill
+and let it configure the project. Do not improvise an alternative path.
+
+## Canonical setup (skill-first)
+
+Prerequisites, stated separately so nothing is hidden:
+
+- **Node.js 22.20 or later** to run `npx skills`.
+- **Python 3.11 or later** for the skill's `scripts/setup.py` helper; where the
+  machine's `python3` is older, run the helper once with
+  `uv run --no-project --python 3.12 scripts/setup.py …`.
+- **Python 3.10 or later**, plus `uv` or `pipx`, for the `onboard-memory-mcp`
+  runtime (reused if already installed).
+
+1. Install the skill into the target project:
+
+   ```bash
+   npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
+   ```
+
+   This is the v4.2.0 preview source. After it merges into `main`, use
+   `npx skills add swisspra/On_Board --skill onboard`. `npx` installs the skill
+   through the skills CLI, not a separate On Board npm package or the Python
+   runtime. PyPI currently provides 4.1.1; preserve a working installation and
+   do not claim the preview's native resources until a 4.2+ runtime is verified.
+
+2. Reload the agent so it discovers the `/onboard` skill (reopen the window or
+   start a new session).
+3. Run the skill with this prompt:
+
+   ```text
+   Using /onboard, set up On Board for this project. Keep existing memory and other MCP servers unchanged.
+   ```
+
+4. Trust and restart the MCP client so it loads the new `agent-memory` server.
+
+The skill reuses one shared `onboard-memory-mcp` runtime: it resolves an existing
+executable first and installs the shared runtime only when none is present
+(reuse, not a per-project install), then configures exactly one project (the one
+you run it in) for exactly one chosen client. It writes only that project's own
+MCP config: a project `.mcp.json` (Claude Code), `.cursor/mcp.json` (Cursor), or
+the trusted project `.codex/config.toml`. It never edits global Claude, Cursor, Codex, Windsurf, VS Code, or
+Antigravity config files -- global client configuration requires separate,
+explicit user consent.
+
+## Canonical references
+
+Read these instead of inventing a flow:
+
+- `skills/onboard/SKILL.md` -- the skill entry point.
+- `skills/onboard/references/install.md` -- install/config reference: 
+  prerequisites, client selection, the `scripts/setup.py` helper, and its
+  operational JSON statuses `configured`, `unchanged`, `needs_configuration`,
+  `conflict`, and `error`.
+- `skills/onboard/references/protocol.md` -- the board protocol agents follow.
+- `docs/SETUP.md` -- manual, package-manager, and clone/script paths.
+
+## Setup is not memory initialization
+
+- Nothing writes, moves, or migrates `.agent-mem/`. Existing memory is preserved
+  exactly as it was.
+- Existing MCP servers, instructions, and hooks in the project config are
+  preserved; the helper merges rather than replaces.
+- If the project already has `.agent-mem/`, do not bootstrap it just because
+  setup ran again.
+
+## After setup
+
+Setup ends when the client is trusted/restarted and the `agent-memory` tools are
+visible in a live session — that is **Ready**. Setup never initializes or joins a
+board: no `memory_init`, `memory_bootstrap`, or `memory_onboard` call and no
+`memory_doctor` health check is part of installation.
+
+Initializing or joining happens only for a **separate, explicit request to start
+work**, and only at that point:
+
+- Existing project with `.agent-mem/` already present: join with
+  `memory_onboard(...)`; never bootstrap it again.
+- New or empty project: `memory_bootstrap(...)` for an existing repo, or
+  `memory_init(...)` for a blank one, then `memory_onboard(...)`.
+
+`memory_doctor()` is a board diagnostic for odd behavior, not a setup gate.
+
+Use a specific `agent_role` when onboarding: `main`, `lead`, `planner`,
+`worker`, `tester`, `reviewer`, `reporter`, `subagent`, `utility`. Use `main`,
+`lead`, or `reviewer` only for agents that should coordinate or resolve stuck
+tickets.
+
+## Source-install safety boundary
+
+Only when the user works from a clone of the On Board source:
+
+- `bash setup-project.sh /path/to/project` and `bash doctor.sh /path/to/project`
+  are the supported source commands; `doctor.sh` is read-only.
+- Never run `setup-project.sh` with the On Board checkout itself as the target
+  project. Verify source hygiene with `bash doctor.sh --self` instead.
+- Linked-project helpers (`--list-linked`, `--refresh-linked`) only manage
+  projects already registered in `<On_Board>/.onboard/linked-projects.json`,
+  which is local machine state and gitignored -- do not commit it.
+- `setup-project.sh` fingerprints core memory files before and after setup and
+  writes `<project>/.onboard/migration-report.json`; it fails if they changed.
+  It never initializes memory content, and it never writes, moves, or deletes
+  `.agent-mem/`.
+
+## If something fails
+
+Follow `doctor.sh`'s `Next:` section rather than blindly rerunning setup: the
+script intentionally does not overwrite custom files, so existing MCP configs and
+hook files may need manual cleanup first. Do not use end-turn/`Stop` hooks to
+write memory; write memory intentionally with `memory_write`, `memory_checkpoint`,
+`memory_handoff`, and the ticket tools.

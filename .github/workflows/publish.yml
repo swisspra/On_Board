@@ -46,9 +46,9 @@ jobs:
 
       - name: Install the wheel into a fresh venv and smoke-test it
         # Gate the upload on a wheel-only install: no editable/source install,
-        # no MCP connection and no real board. The helper clears PYTHONPATH and
-        # runs `python -I` from outside the checkout so an import can only come
-        # from the wheel.
+        # only synthetic local MCP stdio connections, and no real board. The
+        # helper clears PYTHONPATH and runs `python -I` outside the checkout,
+        # so runtime imports can only come from the wheel.
         run: |
           python -m venv .work/package-smoke
           .work/package-smoke/bin/pip install dist/*.whl

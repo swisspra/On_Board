@@ -12,8 +12,10 @@ import zipfile
 
 PAYLOAD = frozenset({
     "server.py", "a2a_wait.py", "ticket_roles.py", "thrift_compress.py",
+    "board_resources.py", "board_subscriptions.py",
     "dashboard_live.py", "onboard_server.py", "docs/assets/on-board-icon.png",
 })
+SDIST_FILES = PAYLOAD | {"pyproject.toml", "README.md", "LICENSE", "PKG-INFO", ".gitignore"}
 PRIVATE = frozenset({
     ".agent-mem", ".onboard", ".venv", "venv", ".env", "__pycache__",
     ".pytest_cache", ".git", ".work", ".claude", ".codex", ".cursor",
@@ -80,7 +82,10 @@ def _sdist_errors(path: Path) -> list[str]:
             if name in seen:
                 errors.append(f"duplicate sdist member: {name}")
             seen.add(name)
-            sources.add("/".join(parts[1:]))
+            relative = "/".join(parts[1:])
+            sources.add(relative)
+            if relative not in SDIST_FILES:
+                errors.append(f"unexpected sdist member: {name}")
         if len(roots) != 1:
             errors.append("sdist must have a single top-level directory")
         required = PAYLOAD | {"pyproject.toml"}

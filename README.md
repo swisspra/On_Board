@@ -31,6 +31,75 @@ Everything stays local to the project unless you choose to connect other tools.
 
 ---
 
+## Quick start (skill-first)
+
+This branch is the **v4.2.0 preview**. Install its skill from inside the project
+you want to configure:
+
+```bash
+# Node.js 22.20 or later; select your agent when prompted.
+npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
+```
+
+After the skill-first changes merge into `main`, the normal command is:
+
+```bash
+npx skills add swisspra/On_Board --skill onboard
+```
+
+`npx` runs the skills CLI from npm; the skill itself comes from Git. There is no
+separate On Board npm package to install, and this command does not install or
+start the Python MCP server by itself. PyPI currently provides **4.1.1**;
+installing the preview skill does not publish or silently upgrade the runtime.
+The new native resources require a verified **4.2+** runtime; see the
+[optional preview runtime](./docs/SETUP.md#preview-runtime-from-source-optional).
+
+Then send your agent this prompt:
+
+```text
+Using /onboard, set up On Board for this project. Keep existing memory and other MCP servers unchanged.
+```
+
+The `/onboard` skill reuses one shared `onboard-memory-mcp` runtime and
+configures **one project** — the one you run it in — for **one client** of your
+choice. It resolves an existing runtime first and installs the shared runtime
+only when none is present (reuse, not a per-project install). It reads and writes
+only that project's own MCP config. It does not initialize or migrate
+`.agent-mem/`, and it does not touch other MCP servers, your instructions, or
+hooks.
+
+What happens, in order:
+
+1. **Reload your agent** after the install so it discovers the new `/onboard`
+   skill (reopen the window, or start a new session).
+2. The skill resolves or installs the shared runtime and writes the project's
+   MCP config.
+3. **Trust and restart your MCP client** so it loads the new `agent-memory`
+   server. Some clients ask before running a newly added server; approve the
+   prompt, then restart.
+
+Prerequisites are real, not hidden behind a one-command promise:
+
+- **Node.js ≥ 22.20** to run `npx skills`.
+- **Setup helper: Python ≥ 3.11.** The skill's `scripts/setup.py` needs it; where
+  the machine's `python3` is older, run the one-time helper with
+  `uv run --no-project --python 3.12 scripts/setup.py …`.
+- **Runtime: Python ≥ 3.10**, plus [`uv`](https://docs.astral.sh/uv/) or `pipx`
+  already installed, for the `onboard-memory-mcp` runtime the skill installs.
+
+Runtime states, so you know where you are: **Runtime available** (the runtime is
+resolved or installed) → **Configured** (the project's MCP config now points at
+it) → **Awaiting trust or restart** (the client has not loaded it yet) →
+**Ready** (the client shows the `agent-memory` tools). Setup ends at Ready;
+initializing or joining a board is a separate step, started only when you
+explicitly ask the agent to begin work.
+
+Prefer to wire things by hand, or install from a package manager or a clone?
+Those paths stay fully supported — see [Manual installation](#manual-installation)
+and [docs/SETUP.md](./docs/SETUP.md).
+
+---
+
 ## 🚀 v4.0.0 — agents now wake each other
 
 Until v4 this board was pull-only: an agent found out about new work when a
@@ -74,7 +143,11 @@ review important changes, and accept the final result.
 
 ---
 
-## Quick start
+## Manual installation
+
+These paths stay supported; they are just secondary to the skill-first quick
+start above. Use them to install from a package manager, or to run everything
+from a clone by hand.
 
 ### Install the server
 
@@ -89,7 +162,7 @@ brew install swisspra/tap/onboard-memory
 pipx install onboard-memory-mcp
 
 # uv
-uv tool install onboard-memory-mcp
+uv tool install --python 3.12 onboard-memory-mcp
 ```
 
 All three provide the `onboard-memory-mcp` command (Homebrew also adds a short
@@ -99,7 +172,7 @@ pipx or uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's
 and run from a clone using the setup paths below. (On Homebrew 6+, approve the
 one-time tap-trust prompt, or run `brew trust swisspra/tap`.)
 
-The v4.1.1 runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
+The v4.2.0 runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
 API. The lockfile selects MCP 2.3.0; SDK 1.x is no longer supported.
 Minimum AnyIO, PyJWT, and cryptography versions also prevent installers from
 retaining known-vulnerable transitive dependencies.
@@ -131,8 +204,10 @@ checkout, no `setup-project.sh`:
   `%USERPROFILE%\.local\bin\onboard-memory-mcp.exe` (pipx / uv on Windows).
 
 `AGENT_PROJECT_DIR` is required — it decides which project owns `.agent-mem/`.
-In your first chat, call `memory_init` once (creates `.agent-mem/`), then
-`memory_onboard` each session. Nothing to create by hand.
+Nothing here initializes memory: starting work is a separate step. In your first
+work session, call `memory_init` once (creates `.agent-mem/`) — or
+`memory_bootstrap` when adopting an existing repo — then `memory_onboard` each
+session. If `.agent-mem/` already exists, never bootstrap it again; just join.
 
 The `pipx`/`uv` path normally uses prebuilt dependency wheels on supported
 CPython 3.11+ platforms. Wheel availability depends on Python and architecture;
@@ -148,8 +223,11 @@ Choose one setup path:
 
 #### Option 1: Agent setup
 
-Ask an agent to read [AGENT_SETUP.md](./AGENT_SETUP.md) and help you set up the
-project. This is the easiest path if you already have an agent available.
+The [skill-first quick start](#quick-start-skill-first) above is the recommended
+path. If you would rather not use the skill CLI, ask an agent to read
+[AGENT_SETUP.md](./AGENT_SETUP.md) — it delegates to the canonical install
+reference instead of inventing a second recipe — and to
+[docs/SETUP.md](./docs/SETUP.md) for the manual steps.
 
 #### Option 2: Script setup
 
@@ -201,8 +279,10 @@ If you do not want to run the setup script, install with `uv sync`, write the
 MCP config yourself, and add project rules/hooks manually. See
 [docs/SETUP.md](./docs/SETUP.md).
 
-In your first chat with any MCP-aware agent (Claude Desktop, Claude Code,
-Cursor, Codex, Antigravity):
+Setup stops at the config; nothing above initializes memory. When you later
+start work in the project — a separate, explicit request — do it in a chat with
+any MCP-aware agent (Claude Desktop, Claude Code, Cursor, Codex, Antigravity).
+Skip `memory_bootstrap` if `.agent-mem/` already exists and just join:
 
 ```
 memory_bootstrap(
@@ -323,6 +403,24 @@ migration guide live in [CHANGELOG.md](./CHANGELOG.md).
 
 Full reference: [docs/TOOLS.md](./docs/TOOLS.md).
 
+### Native resources (v4.2.0)
+
+Three read-only JSON resources are exposed for clients that read MCP resources:
+`onboard://project`, `onboard://tickets`, and `onboard://memory/summary`. They
+return bounded projections (no raw memory bodies) and never create or modify a
+board.
+
+Every resource read is live state with a private `ttlMs 0` hint; only the static
+response catalogs use `ttlMs 60000`. Clients that support resource subscriptions
+and honor them get a coalesced `ResourceUpdated` invalidation notice when any of
+the three resources change. That is a re-read cue — not durable delivery and not
+a model wake-up; there is no replay. Use `memory_wait_for_event` when an agent
+must actually be woken by a peer.
+
+On Board ships no MCP App (`ui://`) view this round: a host-rendered view is not
+a dependable wake mechanism, and not every host — CLI clients in particular —
+renders apps. See [docs/TOOLS.md](./docs/TOOLS.md#resources).
+
 ---
 
 ## What makes this different
@@ -368,22 +466,39 @@ files an audit can read.
 
 ---
 
-## Current status (v4.1.1)
+## Current status (v4.2.0 candidate)
 
-The current local setup is built around one central On Board checkout and one
-project-selected memory folder:
+The primary skill-first route reuses one shared `onboard-memory-mcp` runtime —
+installed once and reused by every configured project, each with its own
+project-selected memory folder. A central On Board checkout stays a supported
+secondary path:
 
+- The skill-first command above is the primary installation
+  entry; a project is configured with the `/onboard` skill for one chosen client,
+  reusing an existing runtime and installing the shared runtime only when none is
+  present. Memory is never initialized or migrated by the installer.
+- Three read-only native resources (`onboard://project`, `onboard://tickets`,
+  `onboard://memory/summary`) expose bounded project, ticket, and memory
+  projections. All three reads carry a private `ttlMs 0` hint (only the static
+  catalogs use `ttlMs 60000`); subscription notifications are a
+  capability-dependent re-read cue, not a model wake-up. They exist only on a
+  verified v4.2+ runtime.
 - `memory_onboard` is the primary start call for agents and returns compact current context.
 - `memory_wait_for_event` turns the board push-capable: agents park, wake on peer
   actions, and close reject/retry loops with zero human relay (see the A2A section).
-- `memory_doctor` checks setup and data integrity.
-- `setup-project.sh` generates project MCP config, rules, startup hooks, and a
-  dashboard launcher.
+- `memory_doctor` checks board health and data integrity — a diagnostic, not a
+  setup gate.
+- The secondary source route runs `setup-project.sh`, which generates project MCP
+  config, rules, startup hooks, and a dashboard launcher.
 - Linked-project registry tracks which projects point at the central checkout,
   so updates can refresh known projects without scanning the machine.
-- Runtime startup uses `python3 onboard_server.py`; the launcher normally
-  execs `.venv/bin/python server.py` and only falls back to `uv sync --inexact`
-  if `.venv` is missing.
+- In that source route, runtime startup uses `python3 onboard_server.py`; the
+  launcher normally execs `.venv/bin/python server.py` and only falls back to
+  `uv sync --inexact` if `.venv` is missing. The primary route points clients at
+  the installed `onboard-memory-mcp` executable instead of the source launcher.
+- Existing working 4.1.1 or source-based bindings keep working unchanged; the
+  skill asks before replacing a shared runtime, and it never upgrades one
+  unsolicited.
 - Startup hooks return a small read-only briefing. End-turn/Stop hooks are not
   installed by default because current clients can run them too often.
 - The dashboard is local and read-only.

@@ -2,18 +2,88 @@
 
 This guide sets up On Board for one target project.
 
-## Requirements
+## Quick start (skill-first)
 
-- Python 3.10+
-- `uv`
-- Git
-- An MCP client such as Claude Desktop, Claude Code, Cursor, Codex, or AntiGravity
+This is the primary entry point. Prerequisites, stated separately so none is
+hidden:
 
-Install `uv` if needed:
+- **Node.js 22.20 or later** to run `npx skills`.
+- **Python 3.11 or later** for the skill's `scripts/setup.py` helper; where the
+  machine's `python3` is older, run the helper once with
+  `uv run --no-project --python 3.12 scripts/setup.py …`.
+- **Python 3.10 or later**, plus `uv` or `pipx`, for the `onboard-memory-mcp`
+  runtime (reused if already installed).
+
+For the **v4.2.0 preview**, install the skill from inside the target project:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
 ```
+
+After these changes merge into `main`, use the normal short command:
+
+```bash
+npx skills add swisspra/On_Board --skill onboard
+```
+
+`npx` runs the skills CLI from npm and installs the Git-distributed skill, not
+the Python server. No separate On Board npm package is needed. PyPI currently
+provides 4.1.1, which the skill can reuse or configure. The preview's native
+resources require a verified 4.2+ runtime; installing or updating only the skill
+does not add them to 4.1.1.
+
+Reload the agent so it discovers the `/onboard` skill, then run it:
+
+```text
+Using /onboard, set up On Board for this project. Keep existing memory and other MCP servers unchanged.
+```
+
+The skill reuses one shared `onboard-memory-mcp` runtime — resolving an existing
+executable first and installing the shared runtime only when none is present —
+and configures only the chosen project and one chosen client. It never
+initializes or migrates `.agent-mem/`, and it never edits other MCP servers.
+Trust and restart the MCP client afterward.
+
+Runtime states, so you know where you are: **Runtime available** (the runtime is
+resolved or installed) → **Configured** (the project's MCP config points at it) →
+**Awaiting trust or restart** (the client has not loaded it yet) → **Ready** (the
+client shows the `agent-memory` tools). Setup ends at Ready; initializing or
+joining a board is a separate step, started only on an explicit request to begin
+work.
+
+Canonical references: [AGENT_SETUP.md](../AGENT_SETUP.md) and
+`skills/onboard/references/install.md`.
+
+### Skill updates and runtime upgrades
+
+After the skill is available on `main`, update the selected project's skill with:
+
+```bash
+npx skills update -p onboard
+```
+
+While testing the preview, rerun the branch-pinned install command above to
+stay on that source. A skill update does not upgrade the shared runtime.
+Runtime upgrades use the original manager (`uv tool upgrade onboard-memory-mcp`,
+`pipx upgrade onboard-memory-mcp`, or an explicitly chosen Homebrew/source
+update). Ask before replacing a working shared runtime.
+
+## Manual and source setup
+
+Everything below is a secondary path for explicit control, or for installing
+from a package manager or a clone. The skill-first quick start above is the
+primary entry point.
+
+These manual and source paths need:
+
+- **Python 3.10+** and **`uv`** for the runtime.
+- **Git** to clone the On Board checkout.
+- An MCP client such as Claude Desktop, Claude Code, Cursor, Codex, or AntiGravity.
+
+If `uv` is missing, review its
+[official installation instructions](https://docs.astral.sh/uv/getting-started/installation/)
+and install the prerequisite explicitly. The skill does not run unreviewed
+network scripts, use `sudo`, or change shell profiles.
 
 ## Option 1: Agent setup
 
@@ -30,7 +100,7 @@ run, and where human confirmation is still needed.
 
 ## Option 2: Script setup
 
-Use this for the normal setup path.
+A source-checkout path for explicit control.
 
 ```bash
 git clone https://github.com/swisspra/On_Board.git
@@ -142,12 +212,12 @@ fingerprints core memory files before and after setup, then writes proof to:
 
 If those core files change during setup, the script fails.
 
-For existing-memory projects, do not bootstrap again unless you intentionally
-want to re-seed project metadata. After setup, use:
+For existing-memory projects, never bootstrap again unless you intentionally want
+to re-seed project metadata. Setup does not onboard: when you later start work (a
+separate, explicit request), join with:
 
 ```text
 memory_onboard()
-memory_doctor()
 ```
 
 If an agent needs to inspect or change On Board setup later, point it to:
@@ -164,17 +234,17 @@ bash /full/path/to/your/project/.onboard/run-dashboard.sh
 
 ## Check setup
 
-Before the MCP client can see On Board tools, use:
+Before the MCP client can see On Board tools, `doctor.sh` checks the generated
+config, rules, hooks, and runtime path (read-only):
 
 ```bash
 bash /full/path/to/On_Board/doctor.sh /full/path/to/your/project
 ```
 
-After the MCP client can see On Board tools, use:
-
-```text
-memory_doctor()
-```
+Once the client shows the `agent-memory` tools, setup is complete — that
+tools-visible check is the setup gate, not a memory call: setup never calls
+`memory_doctor` or any other memory tool. If the board misbehaves later,
+`memory_doctor()` is a diagnostic for that, not a setup step.
 
 ## Update an existing install
 
@@ -234,6 +304,26 @@ bash /full/path/to/On_Board/doctor.sh /full/path/to/your/project
 This regenerates `.onboard/` config, startup hooks, and rules. It does not
 delete `.agent-mem/` project memory.
 
+## Preview runtime from source (optional)
+
+Use this only when you explicitly want the unreleased 4.2 runtime and its native
+resources before publication. The preview skill also works with published
+4.1.1; you do not need to replace a working runtime just to use skill-first setup.
+
+```bash
+git clone --branch feat/skill-first-install --single-branch https://github.com/swisspra/On_Board.git On_Board-preview
+cd On_Board-preview
+uv sync --locked
+.venv/bin/onboard-memory-mcp --version
+```
+
+On Windows, the console is `.venv/Scripts/onboard-memory-mcp.exe`. Reuse this
+checkout's single runtime across projects; give the skill the console's
+**absolute path** when configuring your target project. Do not configure the
+On Board checkout itself as that target, and do not run `uv run` as the daily
+MCP command. This source checkout does not replace a global tool install or
+initialize project memory.
+
 ## Headless install (Homebrew, pipx, or uv)
 
 Use this if you installed the server from a package manager instead of cloning
@@ -242,7 +332,7 @@ the repo:
 ```bash
 brew install swisspra/tap/onboard-memory   # or:
 pipx install onboard-memory-mcp            # or:
-uv tool install onboard-memory-mcp
+uv tool install --python 3.12 onboard-memory-mcp
 ```
 
 After `brew tap swisspra/tap`, the short `brew install onboard-memory` also
@@ -301,9 +391,11 @@ Linux. Upstream Rust, OpenSSL 3, and Python 3.12 bottles are currently unavailab
 for Intel macOS, so do not assume Homebrew avoids source builds there.
 Homebrew is not available on Windows.
 
-Then initialize memory from your first chat (see
-[Initialize project memory](#initialize-project-memory)). `memory_init` creates
-`.agent-mem/` for you — there are no files to write by hand.
+Nothing in this install initializes memory. Starting work is a separate step:
+your first work session initializes memory (see
+[Initialize project memory](#initialize-project-memory)), where `memory_init`
+creates `.agent-mem/` — no files to write by hand. If `.agent-mem/` already
+exists, never bootstrap it again.
 
 ### Per-IDE examples (headless binary)
 
@@ -312,13 +404,9 @@ the bare command for CLI clients and the absolute path (`which onboard-memory-mc
 for GUI clients. Set `AGENT_PROJECT_DIR` to your project's absolute path — it is
 the portable choice across every client.
 
-**Claude Code** — add it with the CLI (verified connected):
-
-```bash
-claude mcp add agent-memory -e AGENT_PROJECT_DIR=/full/path/to/your/project -- onboard-memory-mcp
-```
-
-or commit a project `.mcp.json`:
+**Claude Code** — create a project `.mcp.json` and review the client's approval
+prompt. `claude mcp list` can show **Pending approval**; that is not a connected
+server. Keep machine-specific paths untracked rather than committing this file:
 
 ```json
 { "mcpServers": { "agent-memory": {
@@ -344,14 +432,18 @@ use the absolute binary path:
   "env": { "AGENT_PROJECT_DIR": "${workspaceFolder}" } } } }
 ```
 
-**Codex** — `~/.codex/config.toml` (TOML; no variable expansion, use an absolute
-path):
+**Codex** — trusted project `.codex/config.toml` (TOML; no variable expansion).
+Use an absolute executable path and trust/restart the project in the client:
 
 ```toml
 [mcp_servers.agent-memory]
-command = "onboard-memory-mcp"
+command = "/absolute/path/to/onboard-memory-mcp"
 env = { AGENT_PROJECT_DIR = "/full/path/to/your/project" }
 ```
+
+Global `~/.codex/config.toml` is a separate, explicit-consent alternative, not the
+project setup default. Do not use `codex mcp add` assuming it writes project
+scope, and do not change trust settings to bypass the client's approval step.
 
 Any other `mcpServers`-style client (Windsurf, Antigravity, VS Code) uses the
 same JSON shape. On Board also reads `CURSOR_PROJECT_DIR` and `CLAUDE_PROJECT_DIR`
@@ -470,7 +562,7 @@ active after an approve or reject; and compaction never offboards you.
 
 ## Quick health check
 
-Use:
+This checks board health after you are on board, not whether setup succeeded:
 
 ```text
 memory_status()
@@ -478,4 +570,4 @@ memory_doctor()
 memory_get_briefing({"mode": "brief"})
 ```
 
-If setup is correct, agents should see project memory, active agents, recent notes, and open tickets.
+A healthy board shows project memory, active agents, recent notes, and open tickets.

@@ -1,5 +1,48 @@
 # Changelog
 
+## v4.2.0 (unreleased)
+
+### Added
+
+- The Git-distributed `onboard` skill is the primary installation entry. It
+  configures one selected project's native Claude Code, Cursor, or Codex MCP
+  entry and reuses one shared runtime. The standalone helper requires Python
+  3.11+; the MCP runtime still supports Python 3.10+.
+- Three bounded JSON resources: `onboard://project`, `onboard://tickets`, and
+  `onboard://memory/summary`. Reads do not initialize a board or return raw
+  memory bodies.
+- Native invalidation observes shared files while clients subscribe. Notices
+  are coalesced refetch hints, not an event log, replay, or a model-wake guarantee.
+- `onboard-memory-mcp --version` reports installed package identity without
+  starting stdio service.
+
+### Changed
+
+- Skill installation, shared-runtime provisioning, native project configuration,
+  client trust/restart, and starting project work are separate steps. Installing
+  the skill does not replace a working 4.1.1/source binding or bootstrap memory.
+- Static MCP catalogs carry private 60-second cache hints; all resource reads
+  remain private and uncached. Tools, prompts, portable waits, watch cursors,
+  and heartbeat semantics are unchanged.
+- Source setup and updates use the canonical four-file skill group. Wheels and
+  sdists include both native modules, not skill files or local project state.
+  The helper has a separate Linux/macOS/Windows CI job.
+- The preview documents a branch-pinned `npx skills add` command separately from
+  the default-branch command after merge. Skill delivery from Git and the
+  published Python runtime are independent; pushing this branch is not a release.
+
+### Fixed
+
+- A standalone skill no longer identifies an unrelated directory as an On Board
+  runtime update target.
+- The setup helper checks the selected project's Git index rather than inherited
+  repository/index routing, so a foreign shell environment cannot bypass the
+  tracked-configuration consent boundary.
+- If Git cannot determine whether generated project files are ignored, setup
+  stops before writing native configuration, ignore rules, or memory.
+- Native watcher tasks are cancelled and joined on shutdown. Distribution
+  checks reject unexpected source-archive members as well as wheel contents.
+
 ## v4.1.1
 
 ### Changed

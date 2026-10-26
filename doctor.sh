@@ -468,7 +468,7 @@ for legacy_stop in \
         warn "Legacy On Board stop hook file remains: $legacy_stop"
     fi
 done
-check_optional_file "$PROJECT_DIR/.claude/skills/agent-memory/SKILL.md" "Claude Code agent-memory skill"
+check_optional_file "$PROJECT_DIR/.claude/skills/onboard/SKILL.md" "Claude Code On Board skill"
 
 echo ""
 echo "Git Ignore"

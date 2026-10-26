@@ -8,6 +8,34 @@ wake loop (`memory_wait_for_event`) following exactly the shape recommended
 below — On Board stays the coordination core. An external A2A-protocol
 bridge remains unshipped roadmap.
 
+## Three signals, three layers (native, no external bridge)
+
+On Board's local agent-to-agent story is three distinct things. They are easy to
+conflate, so keep them separate:
+
+- **Resource invalidation** — MCP resource notifications. All three native
+  resources are watched (`onboard://project` too, since `project.json` is
+  mutable): while at least one listener is attached, a process-local watcher
+  stats the shared board files every 2 s; when one changes, clients that support
+  and honor resource subscriptions receive a coalesced `ResourceUpdated` hint.
+  It means "re-read this resource." It is capability-dependent, carries no
+  payload, has no durable log, and never wakes a model. Reads are never cached
+  (private `ttlMs 0`); only the static response catalogs carry `ttlMs 60000`.
+- **Cursor-backed (portable) A2A wait** — `memory_wait_for_event`. The wait keeps
+  a persisted snapshot cursor in the agent's own watch file, so a re-arm after a
+  gap returns the pending snapshot diff instead of waking empty. It is a diff
+  between snapshots, not a lossless transition log: intermediate transitions
+  coalesce and can be missed, and there is no event log or replay. Even so, the
+  wait is what makes the board push-capable without a human relay.
+- **Model wake-up** — the listening loop that actually resumes a parked agent
+  when `memory_wait_for_event` returns. This is the only layer that continues
+  agent work; resource notifications never wake a model, so native hints alone
+  do not guarantee a host's model wakes.
+
+MCP resources and their notifications are for cheap context refresh inside one
+client. The cursor-backed wait is the coordination half. Neither is an external
+A2A transport — that remains unshipped roadmap below.
+
 ## Current protocol read
 
 A2A and MCP solve different parts of the same system. MCP connects an agent to

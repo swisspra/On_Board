@@ -1,6 +1,6 @@
 [project]
 name = "onboard-memory-mcp"
-version = "4.1.1"
+version = "4.2.0"
 description = "On Board — Cross-platform shared memory MCP for multi-agent project coordination. One project, one memory, every platform."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,6 +32,8 @@ only-include = [
     "a2a_wait.py",
     "ticket_roles.py",
     "thrift_compress.py",
+    "board_resources.py",
+    "board_subscriptions.py",
     "dashboard_live.py",
     "onboard_server.py",
     "docs/assets/on-board-icon.png",
@@ -46,6 +48,8 @@ only-include = [
     "a2a_wait.py",
     "ticket_roles.py",
     "thrift_compress.py",
+    "board_resources.py",
+    "board_subscriptions.py",
     "dashboard_live.py",
     "onboard_server.py",
     "docs/assets/on-board-icon.png",
