@@ -31,8 +31,9 @@ PURITY
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Awaitable, Callable, Iterable, Optional, Union
 
 # --- wait outcomes -------------------------------------------------------
 #
@@ -123,6 +124,11 @@ def _ticket_event(kind: str, t: dict, **extra) -> dict:
     return ev
 
 
+def rejection_count_grew(old: dict, cur: dict) -> bool:
+    """True when these two ticket dicts straddle a new rejection."""
+    return (cur.get("rejection_count") or 0) > (old.get("rejection_count") or 0)
+
+
 def diff_tickets(prev: dict, cur: dict) -> list:
     """Yield ticket events between two index snapshots keyed by ticket id."""
     events = []
@@ -131,7 +137,10 @@ def diff_tickets(prev: dict, cur: dict) -> list:
         if old is None:
             events.append(_ticket_event(TICKET_CREATED, t))
             continue
-        if old.get("status") != t.get("status"):
+        # A reject-reopen lands the ticket back on 'open' in the same write,
+        # so the count delta is the only trace it left (see rejection_happened).
+        # Both signals fold into ONE event; firing twice would double-poke.
+        if old.get("status") != t.get("status") or rejection_count_grew(old, t):
             events.append(_ticket_event(
                 TICKET_STATUS_CHANGED, t,
                 previous_status=old.get("status"),
@@ -277,7 +286,7 @@ async def wait_for_events(
     timeout_s: Any = DEFAULT_TIMEOUT_S,
     desktop_safe: bool = True,
     poll_interval_s: float = DEFAULT_POLL_INTERVAL_S,
-    heartbeat_fn: Optional[Callable[[], None]] = None,
+    heartbeat_fn: Optional[Callable[[], Union[None, Awaitable[None]]]] = None,
     idle_count: int = 0,
     idle_budget_idles: Optional[int] = None,
     sleep_fn: Optional[Callable] = None,
@@ -292,7 +301,10 @@ async def wait_for_events(
         waking empty-handed. When None, the current state becomes the
         baseline and we listen forward from now.
     :param heartbeat_fn: fired every tick so a peer's idle sweep does not
-        mark this parked agent KIA.
+        mark this parked agent KIA. May be sync (returns None) or async
+        (returns an awaitable); an awaited beat is awaited to completion
+        BEFORE the snapshot is read, so the board lock it takes cannot
+        interleave with the read.
     :returns: {"status": "hit"|"idle", "events": [...], "snapshot": {...}}
         The caller persists `snapshot` as the next baseline, on both outcomes.
     """
@@ -301,14 +313,21 @@ async def wait_for_events(
     started = clock()
     deadline = started + budget
 
-    def _beat():
-        if heartbeat_fn:
-            try:
-                heartbeat_fn()
-            except Exception:      # never let liveness bookkeeping kill a wait
-                pass
+    async def _beat():
+        if not heartbeat_fn:
+            return
+        try:
+            res = heartbeat_fn()
+            if inspect.isawaitable(res):
+                await res
+        except asyncio.CancelledError:
+            # A cancelled wait must stay cancelled; swallowing it here would
+            # strand the caller's task inside the loop.
+            raise
+        except Exception:      # never let liveness bookkeeping kill a wait
+            pass
 
-    _beat()
+    await _beat()
     current = snapshot_fn()
 
     # CHECK BEFORE BLOCKING: drain whatever accrued while we were away.
@@ -326,7 +345,7 @@ async def wait_for_events(
 
     while clock() < deadline:
         await sleep(min(poll_interval_s, max(0.0, deadline - clock())))
-        _beat()
+        await _beat()
         current = snapshot_fn()
         events = diff_events(baseline, current, agent_name=agent_name,
                              kinds=kinds, only_mine=only_mine)

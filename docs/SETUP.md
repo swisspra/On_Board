@@ -188,6 +188,15 @@ bash update.sh
 `update.sh` shows linked projects it knows about. It does not refresh project
 files by default.
 
+To deploy code to another On Board checkout, run `bash update.sh /path/to/copy`.
+The updater requires `server.py`, `a2a_wait.py`, `ticket_roles.py`,
+`thrift_compress.py`, and `docs/assets/on-board-icon.png` in the source before
+overwriting any destination; existing destination files are backed up first.
+Success requires importing the copied server with that destination's Python.
+If files were copied but its runtime is missing or fails to import, the updater
+reports the failure and exits nonzero; finish `uv sync --inexact` in that copy
+and rerun. It does not install dependencies globally.
+
 To list linked projects:
 
 ```bash
@@ -452,7 +461,11 @@ memory_submit_ticket(...)
 memory_review_ticket(...)
 ```
 
-If a memory tool says `NOT ON BOARD`, call `memory_onboard` again and retry. Handoff, submit, review, and compaction flows may intentionally end the active session.
+If a memory tool says `NOT ON BOARD`, call `memory_onboard` again and retry. Only
+`memory_handoff`, and a `memory_submit_ticket` that hands you off, intentionally
+end your active session: submitting with `stay_active=true`, or while you still
+owe a review on another submitted ticket, keeps you on board; the reviewer stays
+active after an approve or reject; and compaction never offboards you.
 
 ## Quick health check
 

@@ -127,7 +127,7 @@ memory_create_ticket(
   scope="interactive-no-send",
   required_fields=["screenshot", "files_changed", "verification"],
   priority="high",
-  assigned_to="cursor"
+  assigned_to="cursor-coder"
 )
 ```
 
@@ -142,7 +142,10 @@ memory_submit_ticket(
   files_changed=["file1.css"]
 )
 ```
-Submit auto-handoffs you. Reviewer picks up.
+Submit normally hands you off so the reviewer can pick it up — pass
+`stay_active=True` to keep listening for the verdict, and you are also kept on
+board while you still owe a review on another submitted ticket. The reviewer
+stays active after it approves or rejects.
 
 ### Review
 ```

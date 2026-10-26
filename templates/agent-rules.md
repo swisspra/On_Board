@@ -38,12 +38,13 @@ mode changes.
 Tickets move work between agents:
 
 - `memory_create_ticket` — request help / assign work
+- `assigned_to` takes an exact, case-sensitive stable agent name (`cursor-coder`, `codex-main`), never a platform; omit it to leave the ticket in the open queue
 - Ticket description is capped at 5000 chars; keep concise, link to memories/files
 - New tickets need: `target_url`, `scope`, `required_fields`
 - Valid scope: `READ-ONLY`, `interactive-no-send`, `interactive`
 - `memory_claim_ticket` — pick up assigned work
 - `memory_submit_ticket` — submit for review
-- `memory_review_ticket` — approve or reject w/ fix instructions
+- `memory_review_ticket` — approve or reject w/ fix instructions; reviewer stays active afterwards
 
 ## Naming
 
@@ -63,7 +64,7 @@ Tickets move work between agents:
 
 ## Operating Rules
 
-1. **Re-join after every off-board action.** `memory_handoff`, `memory_submit_ticket`, `memory_review_ticket`, compaction → end active session. Next write/ticket mutation may fail w/ `NOT ON BOARD` → call `memory_onboard` again, retry.
+1. **Re-join after a real hand-off, not after every tool.** `memory_handoff`, and a `memory_submit_ticket` that hands you off, end the active session → the next write/ticket call may fail w/ `NOT ON BOARD`, so call `memory_onboard` again and retry. Submitting with `stay_active=True`, or while you still owe a review on another submitted ticket, keeps you on board; `memory_review_ticket` leaves the reviewer active; compaction never offboards you.
 2. **Check mid-flight, not only at start.** Use `memory_status`, `memory_read since_minutes=30`, or `memory_get_briefing` after long pauses, after compaction, before commits on shared paths, when user mentions parallel agent.
 3. **Write as you go, not batched.** After each commit, ticket claim, decision, discovery, blocker, warning → write next-agent context.
 4. **`memory_checkpoint` every 10-15 min during long work.** Include status, files touched, blockers, remaining tasks.

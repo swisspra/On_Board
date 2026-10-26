@@ -217,6 +217,63 @@ def test_rejection_happened_needs_the_count_to_INCREASE():
     assert W.rejection_happened(ev2) is False
 
 
+# --- reject-reopen with an UNCHANGED status ------------------------------
+
+def _reopen_after_reject(reviewer, *, count=1, notes="not good enough",
+                         fix="do X"):
+    """memory_review_ticket rejects and reopens in one write, so the poller
+    only ever sees open/count=N-1 -> open/count=N."""
+    prev = FakeBoard().ticket("T1", status="open", created_by="alice",
+                              claimed_by="bob", reviewed_by=reviewer,
+                              rejection_count=count - 1).snapshot()
+    cur = FakeBoard().ticket("T1", status="open", created_by="alice",
+                             claimed_by="bob", reviewed_by=reviewer,
+                             rejection_count=count, review_notes=notes,
+                             fix_instructions=fix).snapshot()
+    return prev, cur
+
+
+def test_open_to_open_reject_is_still_a_status_change():
+    """Diffing the status alone missed it: the ticket lands where it started."""
+    prev, cur = _reopen_after_reject("alice")
+    evs = W.diff_events(prev, cur, agent_name="bob", only_mine=False)
+    assert len(evs) == 1
+    ev = evs[0]
+    assert ev["kind"] == W.TICKET_STATUS_CHANGED
+    assert ev["previous_status"] == "open"
+    assert ev["rejection_count"] == 1
+    assert ev["previous_rejection_count"] == 0
+    assert ev["review_notes"] == "not good enough"
+    assert ev["fix_instructions"] == "do X"
+
+
+def test_open_to_open_reject_is_attributed_to_the_reviewer():
+    prev, cur = _reopen_after_reject("alice")
+    ev = W.diff_events(prev, cur, agent_name="bob", only_mine=False)[0]
+    assert W.rejection_happened(ev) is True
+    assert W.infer_actor(ev) == "alice"
+
+
+def test_unchanged_rejection_count_is_not_an_event():
+    """The count persists forever; only its delta is a new rejection."""
+    board = FakeBoard().ticket("T1", status="open", created_by="alice",
+                               claimed_by="bob", rejection_count=2).snapshot()
+    assert W.diff_events(board, board, agent_name="bob") == []
+
+
+def test_status_and_count_change_emit_one_event():
+    prev = FakeBoard().ticket("T1", status="claimed", created_by="alice",
+                              claimed_by="bob", rejection_count=0).snapshot()
+    cur = FakeBoard().ticket("T1", status="open", created_by="alice",
+                             claimed_by="bob", rejection_count=1).snapshot()
+    evs = W.diff_events(prev, cur, agent_name="bob", only_mine=False)
+    assert len(evs) == 1
+    assert evs[0]["kind"] == W.TICKET_STATUS_CHANGED
+    assert evs[0]["previous_status"] == "claimed"
+    assert evs[0]["previous_rejection_count"] == 0
+    assert evs[0]["rejection_count"] == 1
+
+
 # --- the wait loop -------------------------------------------------------
 
 def _run(board, *, baseline=None, agent="bob", timeout_s=180, beats=None):
@@ -271,6 +328,107 @@ def test_heartbeat_fires_every_tick():
     board = FakeBoard().ticket("T1", created_by="alice")
     _run(board, baseline=board.snapshot(), timeout_s=180, beats=beats)
     assert len(beats) > 10
+
+
+def _reject_at_read_two(board, reviewer="alice", **verdict):
+    """Script the reject-reopen that memory_review_ticket performs."""
+    ticket = dict(status="open", created_by="alice", claimed_by="bob",
+                  reviewed_by=reviewer, rejection_count=1)
+    ticket.update(verdict)
+    board.at_read(2, lambda b: b.ticket("T1", **ticket))
+    return board
+
+
+def test_parked_worker_wakes_on_an_open_to_open_reject():
+    board = FakeBoard().ticket("T1", status="open", created_by="alice",
+                               claimed_by="bob", rejection_count=0)
+    _reject_at_read_two(board, review_notes="word count is off by 12",
+                        fix_instructions="exclude the frontmatter")
+    res, _ = _run(board, baseline=board.snapshot())
+    assert res["status"] == "hit"
+    assert res["drained_backlog"] is False
+    ev = res["events"][0]
+    assert ev["ticket_id"] == "T1"
+    assert ev["previous_status"] == "open"
+    assert ev["previous_rejection_count"] == 0
+    assert ev["review_notes"] == "word count is off by 12"
+    assert ev["fix_instructions"] == "exclude the frontmatter"
+    assert ev["reviewed_by"] == "alice"
+
+
+def test_the_reviewers_own_reopen_does_not_wake_her():
+    """Same event, reviewed_by=alice: the loop guard must swallow it."""
+    board = FakeBoard().ticket("T1", status="open", created_by="alice",
+                               claimed_by="bob", rejection_count=0)
+    _reject_at_read_two(board, reviewer="alice",
+                        review_notes="not good enough")
+    res, _ = _run(board, agent="alice", baseline=board.snapshot(), timeout_s=6)
+    assert res["status"] == "idle"
+    assert res["events"] == []
+
+
+def _run_heartbeat(board, beat, *, timeout_s=10):
+    clock = FakeClock()
+    return asyncio.run(W.wait_for_events(
+        board.snapshot, agent_name="bob", baseline=board.snapshot(),
+        timeout_s=timeout_s, poll_interval_s=2.0,
+        heartbeat_fn=beat, sleep_fn=clock.sleep, clock=clock,
+    ))
+
+
+def test_async_heartbeat_completes_before_every_snapshot():
+    """Agent A's callback takes the board lock, so it has to finish first."""
+    board = FakeBoard().ticket("T1", created_by="alice")
+    order = []
+
+    async def beat():
+        await asyncio.sleep(0)       # real await: a sync call would skip it
+        order.append("beat")
+
+    def snap():
+        order.append("snapshot")
+        return board.snapshot()
+
+    clock = FakeClock()
+    res = asyncio.run(W.wait_for_events(
+        snap, agent_name="bob", baseline=board.snapshot(),
+        timeout_s=10, poll_interval_s=2.0,
+        heartbeat_fn=beat, sleep_fn=clock.sleep, clock=clock,
+    ))
+    assert res["status"] == W.IDLE
+    assert order == ["beat", "snapshot"] * (len(order) // 2)
+    assert order[0] == "beat"                    # before the FIRST snapshot
+    assert order.count("beat") == order.count("snapshot") > 1
+
+
+def test_ordinary_heartbeat_errors_do_not_kill_the_wait():
+    """Liveness bookkeeping still may not break a parked agent."""
+    def sync_beat():
+        raise RuntimeError("heartbeat hiccup")
+
+    async def async_beat():
+        raise RuntimeError("heartbeat hiccup")
+
+    for beat in (sync_beat, async_beat):
+        res = _run_heartbeat(FakeBoard().ticket("T1", created_by="alice"),
+                             beat, timeout_s=4)
+        assert res["status"] == W.IDLE
+
+
+def test_heartbeat_cancellation_is_not_swallowed():
+    """A cancelled wait must stay cancelled, sync or async callback."""
+    def sync_beat():
+        raise asyncio.CancelledError
+
+    async def async_beat():
+        raise asyncio.CancelledError
+
+    for beat in (sync_beat, async_beat):
+        try:
+            _run_heartbeat(FakeBoard().ticket("T1", created_by="alice"), beat)
+        except asyncio.CancelledError:
+            continue
+        raise AssertionError(f"{beat} cancellation was swallowed")
 
 
 def test_no_baseline_listens_forward_not_backward():

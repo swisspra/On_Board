@@ -79,7 +79,7 @@ def main() -> int:
             print("WORKER FAILED:", err[:800])
             return 1
 
-    idx = json.load(open(SCRATCH / ".agent-mem" / "tickets" / "_index.json"))
+    idx = json.loads((SCRATCH / ".agent-mem" / "tickets" / "_index.json").read_text(encoding="utf-8"))
     tickets = idx["tickets"] if isinstance(idx, dict) else idx
     expected = N_PROCS * N_TICKETS
     ids = [t["id"] for t in tickets]
@@ -97,6 +97,16 @@ def main() -> int:
                  for i in range(N_PROCS)}
     check("every process kept all its writes",
           all(v == N_TICKETS for v in per_agent.values()), str(per_agent))
+    # agents.json is read-modify-written by join, every heartbeat and every
+    # lazy sweep. All three ran concurrently here, so a dropped write would
+    # surface as a missing registry record or an agent swept mid-heartbeat.
+    agents = json.loads((SCRATCH / ".agent-mem" / "agents.json").read_text(encoding="utf-8"))
+    by_name = {a["agent_name"]: a for a in agents.values()}
+    check("every worker kept its registry record",
+          set(by_name) == {f"agent{i}" for i in range(N_PROCS)}, str(list(by_name)))
+    check("no heartbeat was lost to a concurrent sweep",
+          all(a["status"] == "active" for a in by_name.values()),
+          str({k: v["status"] for k, v in by_name.items()}))
     # HIGH-1: every listener got its own intact cursor file
     cursors = sorted((SCRATCH / ".agent-mem").glob("watch-*.json"))
     check(f"per-agent cursor files ({N_PROCS} expected)", len(cursors) == N_PROCS,
@@ -104,7 +114,7 @@ def main() -> int:
     parse_ok = True
     for c in cursors:
         try:
-            json.load(open(c))
+            json.loads(c.read_text(encoding="utf-8"))
         except Exception:
             parse_ok = False
     check("all cursors parse (no tmp-collision corruption)", parse_ok)

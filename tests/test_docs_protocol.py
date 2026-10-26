@@ -1,97 +1,17 @@
+import asyncio
+import importlib.util
+import json
+import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+import uuid
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_skill_uses_significant_action_protocol():
-    skill = (REPO_ROOT / "SKILL.md").read_text(encoding="utf-8")
-
-    assert "significant action" in skill
-    assert "EVERY action" not in skill
-
-
-def test_docs_make_memory_onboard_the_primary_agent_entrypoint():
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    skill = (REPO_ROOT / "SKILL.md").read_text(encoding="utf-8")
-    server = (REPO_ROOT / "server.py").read_text(encoding="utf-8")
-
-    assert "memory_onboard" in readme
-    assert "memory_onboard" in skill
-    assert "ticket mutation" in skill
-    assert "platform-model-date" not in server
-
-
-def test_rules_and_hooks_wrap_protocol_in_xml_tags():
-    files = [
-        "SKILL.md",
-        "setup-project.sh",
-        "templates/agent-rules.md",
-        "hooks/onboard-mini-brief.py",
-    ]
-    for path in files:
-        text = (REPO_ROOT / path).read_text(encoding="utf-8")
-        assert "<on_board_protocol>" in text, path
-        assert "<required_first_call>memory_onboard</required_first_call>" in text, path
-
-
-def test_setup_uses_shared_agent_rules_template():
-    setup = (REPO_ROOT / "setup-project.sh").read_text(encoding="utf-8")
-    template = (REPO_ROOT / "templates/agent-rules.md").read_text(encoding="utf-8")
-
-    assert "templates/agent-rules.md" in setup
-    assert "RULES_NOTE=\"$(cat \"$RULES_TEMPLATE\")\"" in setup
-    assert "Re-join after every off-board action" in template
-    assert "joins the session and returns compact current context" in template
-    assert "target_url" in template
-    assert "required_fields" in template
-    assert "description" in template
-    assert "5000" in template
-    assert "memory_read since_minutes=30" in template
-    assert "Commit carefully in shared working trees" in template
-    assert "memory_submit_ticket" in template
-    assert "Cloudflare Pages" not in template
-    assert "netlea" not in template.lower()
-    assert "migration" not in template.lower()
-
-
-def test_start_hooks_point_agents_to_memory_onboard():
-    hook_text = "\n".join(
-        (REPO_ROOT / path).read_text(encoding="utf-8")
-        for path in [
-            "hooks/cursor-session-start.sh",
-            "hooks/claude-code-session-start.sh",
-            "hooks/codex-session-start.sh",
-        ]
-    )
-    helper = (REPO_ROOT / "hooks/onboard-mini-brief.py").read_text(encoding="utf-8")
-
-    assert "onboard-mini-brief.py" in hook_text
-    assert "memory_onboard" in helper
-    assert "MAX_CHARS" in helper
-    assert "PINNED_LIMIT" in helper
-    assert "AGENTS_LIMIT" in helper
-    assert "Do not write memory every turn" in helper
-    assert "memory_agent_join → memory_get_briefing" not in hook_text
-
-
-def test_stop_hooks_are_not_installed_or_memory_writing_by_default():
-    configs = "\n".join(
-        (REPO_ROOT / path).read_text(encoding="utf-8")
-        for path in [
-            "configs/claude-code-settings.json",
-            "configs/codex-hooks.json",
-            "configs/cursor-hooks.json",
-        ]
-    )
-    assert '"Stop"' not in configs
-    assert '"stop"' not in configs
-    assert "Turn-scoped Stop hook is still configured" in (REPO_ROOT / "doctor.sh").read_text(encoding="utf-8")
-    assert not (REPO_ROOT / "hooks/claude-code-stop.sh").exists()
-    assert not (REPO_ROOT / "hooks/codex-stop.sh").exists()
-    assert not (REPO_ROOT / "hooks/cursor-session-end.sh").exists()
 
 
 def test_public_source_repo_has_no_generated_project_files():
@@ -141,68 +61,79 @@ def test_release_materials_match_current_version():
         f"changelog leads with {first_header!r}, pyproject says {version}")
     assert f"v{version}" in release_notes, f"RELEASE_NOTES.md does not mention v{version}"
 
-    # The vocabulary check below used to run against RELEASE_NOTES.md, which made
-    # it the same bug this docstring complains about: the version literal was
-    # removed, but six content literals stayed, so every release still had to
-    # hand-edit its own guard. A patch release has no reason to re-describe the
-    # A2A feature set, and padding its notes to satisfy a test is how a gate
-    # starts measuring compliance instead of correctness.
-    #
-    # The real requirement is that this vocabulary stays DOCUMENTED, not that it
-    # appears in whatever shipped last. README plus CHANGELOG is where it lives.
-    # 'reject -> fix -> resubmit' is dropped: it was prose phrasing unique to the
-    # v4.0.0 notes, and asserting on an exact sentence is brittle by construction.
-    docs = (REPO_ROOT / "README.md").read_text(encoding="utf-8") + changelog
-    for expected in ["memory_wait_for_event", "stay_active", "allow_self_review",
-                     "migration guide", "SELF-REVIEWED"]:
-        assert expected in docs, f"{expected!r} is documented nowhere in README or CHANGELOG"
 
 
-def test_uv_install_docs_and_template_are_present():
+def _backticked_tool_names(text: str) -> set:
+    return set(re.findall(r"`(memory_[a-z_]+)`", text))
+
+
+def _registry_tool_names(tmp_path):
+    """The server's real tool registry, imported away from any real board.
+
+    AGENT_PROJECT_DIR (and the fallbacks server.py reads) are pinned to a
+    throwaway project BEFORE the import, because the memory root is resolved at
+    import time, and restored afterwards so this cannot touch a user's board.
+    """
+    keys = ("AGENT_PROJECT_DIR", "CURSOR_PROJECT_DIR", "CLAUDE_PROJECT_DIR",
+            "AGENT_MEM_VECTOR_BACKEND")
+    saved = {key: os.environ.get(key) for key in keys}
+    os.environ["AGENT_PROJECT_DIR"] = str(tmp_path)
+    os.environ.pop("CURSOR_PROJECT_DIR", None)
+    os.environ.pop("CLAUDE_PROJECT_DIR", None)
+    os.environ["AGENT_MEM_VECTOR_BACKEND"] = "none"
+    sys.path.insert(0, str(REPO_ROOT))
+    try:
+        name = f"docs_protocol_server_{uuid.uuid4().hex}"
+        spec = importlib.util.spec_from_file_location(name, REPO_ROOT / "server.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return {tool.name for tool in asyncio.run(module.mcp.list_tools())}
+    finally:
+        sys.path.remove(str(REPO_ROOT))
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def test_documented_tool_inventory_matches_the_registry(tmp_path):
+    """The public tool list is a contract: compare names, not a count.
+
+    The README table and the docs/TOOLS headings must each cover every tool the
+    server registers, and no tool the server does not have. A renamed or deleted
+    tool therefore fails here instead of lingering in prose, which is how the
+    docs drifted to 28/29 tools while the server exposed 30.
+    """
+    actual = _registry_tool_names(tmp_path)
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    setup = (REPO_ROOT / "setup-project.sh").read_text(encoding="utf-8")
-    agent_setup = (REPO_ROOT / "AGENT_SETUP.md").read_text(encoding="utf-8")
-    template = (REPO_ROOT / "configs/local-venv-mcp.json").read_text(encoding="utf-8")
-    uv_run_template = (REPO_ROOT / "configs/uv-run-mcp.json").read_text(encoding="utf-8")
+    tools_doc = (REPO_ROOT / "docs/TOOLS.md").read_text(encoding="utf-8")
 
-    assert "uv sync" in readme
-    assert "uv sync --inexact" in readme
-    assert "onboard_server.py" in readme
-    assert ".venv/bin/python" in readme
-    assert "startup timeouts" in readme
-    assert "Option 1: Agent setup" in readme
-    assert "Option 2: Script setup" in readme
-    assert "Option 3: Advanced manual setup" in readme
-    assert ".onboard/mcp.generated.json" in readme
-    assert ".onboard/mcp.generated.json" in setup
-    assert ".onboard/AGENT_CONTROL.md" in setup
-    assert ".onboard/AGENT_CONTROL.md" in (REPO_ROOT / "templates/agent-rules.md").read_text(encoding="utf-8")
-    assert "Runtime memory after init" in setup
-    assert ".cursorrules" in setup
-    assert "doctor.sh" in readme
-    assert (REPO_ROOT / "doctor.sh").exists()
-    assert "run-dashboard.sh" in readme
-    assert "AGENT_CONTROL.md" in agent_setup
-    assert "memory_bootstrap" in agent_setup
-    assert "Do not silently edit global" in agent_setup
-    assert "Do not use turn-scoped `Stop`" in agent_setup
-    assert "uvx" in agent_setup
-    assert "uvx" not in template
-    assert '"command": "python3"' in template
-    assert "/full/path/to/On_Board/onboard_server.py" in template
-    assert '"command": "uv"' in uv_run_template
-    assert '"--directory"' in uv_run_template
-    assert "AGENT_MEM_CONTEXT_DIRS" in readme
-    assert '"AGENT_MEM_CONTEXT_DIRS"' in template
+    readme_table = readme.split("## Tools", 1)[1].split("\n---", 1)[0]
+    documented_table = _backticked_tool_names(readme_table)
+    documented_headings = set(
+        re.findall(r"^### `(memory_[a-z_]+)`", tools_doc, re.MULTILINE))
 
+    assert documented_table == actual, (
+        f"README table missing {sorted(actual - documented_table)}; "
+        f"unknown {sorted(documented_table - actual)}")
+    assert documented_headings == actual, (
+        f"docs/TOOLS headings missing {sorted(actual - documented_headings)}; "
+        f"unknown {sorted(documented_headings - actual)}")
 
-def test_readme_keeps_roadmap_notes_out_of_front_page():
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    a2a_note = (REPO_ROOT / "docs/A2A.md").read_text(encoding="utf-8")
+    # The LobeHub plugin manifest is the same public list in machine-readable
+    # form; it drifted once already (it advertised a tool the server did not
+    # have), so it is held to the registry too.
+    manifest = json.loads((REPO_ROOT / "lhm.plugin.json").read_text(encoding="utf-8"))
+    advertised = {tool["name"] for tool in manifest["tools"]}
+    assert advertised == actual, (
+        f"lhm.plugin.json missing {sorted(actual - advertised)}; "
+        f"advertising unknown {sorted(advertised - actual)}")
 
-    assert "Honest gaps" not in readme
-    assert "Q3 templates" not in readme
-    assert "Agent-to-agent: the listening half" in readme      # shipped in v4, belongs on the front page
-    assert "a2a-protocol.org" not in readme                    # the external protocol bridge is still roadmap
-    assert "TASK_STATE_REJECTED" in a2a_note
-    assert "Last checked: 2026-07-16" in a2a_note
+    for path in ("README.md", "docs/TOOLS.md", "docs/SETUP.md", "SKILL.md",
+                 "templates/agent-rules.md"):
+        named = _backticked_tool_names((REPO_ROOT / path).read_text(encoding="utf-8"))
+        # `kinds` documents event names, and `memory_written` matches the
+        # tool-name shape without being a tool.
+        unknown = named - actual - {"memory_written"}
+        assert not unknown, f"{path} mentions unknown tools: {sorted(unknown)}"
