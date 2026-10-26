@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ast
 import json
-import re
+from html.parser import HTMLParser
 import shutil
 import subprocess
 import tempfile
@@ -66,9 +66,31 @@ def render_template() -> str:
 
 
 def extract_inline_js(html: str) -> str:
-    match = re.search(r"<script>(.*?)</script>", html, re.S)
-    assert match, "inline <script> block not found in rendered dashboard"
-    return match.group(1)
+    class ScriptExtractor(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.blocks = []
+            self.capturing = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script":
+                self.capturing = not any(name == "src" for name, _ in attrs)
+                if self.capturing:
+                    self.blocks.append([])
+
+        def handle_data(self, data):
+            if self.capturing:
+                self.blocks[-1].append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "script":
+                self.capturing = False
+
+    parser = ScriptExtractor()
+    parser.feed(html)
+    parser.close()
+    assert parser.blocks, "inline <script> block not found in rendered dashboard"
+    return "".join(parser.blocks[0])
 
 
 # --------------------------------------------------------------------------- #

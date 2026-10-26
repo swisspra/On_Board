@@ -76,7 +76,9 @@
 - GitHub Actions use immutable action commits and do not persist checkout
   credentials. Pages build/deploy permissions are scoped per job, and CI
   audits the hashed runtime dependency export without ignoring advisories.
-  The combined regression suite treats warnings as errors.
+  The combined regression suite treats warnings as errors. Its dashboard
+  JavaScript extractor uses an HTML parser instead of an incomplete,
+  case-sensitive tag regex flagged by CodeQL.
 
 ## v4.0.4
 
