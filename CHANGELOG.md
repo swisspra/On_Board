@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v4.1.0
 
 ### Changed
 
@@ -9,11 +9,11 @@
   content, and recorded compaction comparisons. It reports saved text, not
   inferred quota, provider usage, or time gained. Missing compression baselines
   remain unreported, and summaries larger than their source show growth.
-- Migrated the development runtime to the official MCP SDK 2.3.0 `MCPServer`
+- Migrated the runtime to the official MCP SDK 2.3.0 `MCPServer`
   API, including snake_case Python models and public tool discovery in setup,
   doctor, and update scripts. The thirty tools and two prompts are retained.
   SDK 1.x is no longer supported by this source tree; no board migration is
-  required. These changes have not yet been published to PyPI.
+  required.
 - Raised dependency minimums to patched AnyIO, PyJWT, and cryptography versions.
   The lock selects MCP 2.3.0, AnyIO 4.15.1, PyJWT 2.15.1, and cryptography
   50.0.2; the SDK 2 dependency graph no longer includes certifi.

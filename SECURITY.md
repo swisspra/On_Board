@@ -8,7 +8,7 @@ The On Board project maintains several release channels. Only the latest versi
 | Version   | Supported          | Details                |
 | ----------| -------------------| -----------------------|
 | `main`    | :white_check_mark: | Main.                  |
-| `v3.5.x`  | :white_check_mark: | Latest stable release  |
+| `v4.1.x`  | :white_check_mark: | Latest stable release  |
 | `< v3.2.x`| :warning:          | Previous minor releases|
 | `nightly` | :x:                | Experimental           |
 | `< v3.0`  | :x:                | EOD                    |
