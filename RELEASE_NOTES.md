@@ -1,28 +1,38 @@
-# v4.0.2 — the lock on the front door
+# v4.0.4 — terminal tickets leave the open queue
 
-Patch release. Two fixes, both found by running the board rather than reading
-it.
+Patch release. Ticket files now agree with the index after cancellation or
+termination, operator-facing counts and messages describe what the tools
+actually show, and On Board is ready for publication to the official MCP
+Registry.
 
-- **`memory_onboard` wrote the agent record without holding the board lock.**
-  It and `memory_agent_join` call the same helper, and only `agent_join` was
-  locked — so the unlocked path was the one every session opens first. Two
-  doors onto one write, and the open one was the front door. `_board_lock()`
-  is now a context manager that `_with_board_lock` is built from; onboard holds
-  it across the join and *not* across the briefing render, so a slow briefing
-  cannot block the board.
+- **Canceled and terminated tickets are filed under `tickets/closed/`.** The
+  index already recorded the right terminal state, but the Markdown file stayed
+  in `tickets/`, which is documented as the open queue. New cancel and terminate
+  operations now write the terminal record under `closed/`, remove the open
+  copy, and carry any submission out of `tickets/review/`. The response names
+  the final path.
 
-- **A new test file that can actually fail.** `test_board_lock.py` checks the
-  invariants instead of the symptom: every mutating tool holds the lock, onboard
-  does not hold it across the render, and `_join_agent_session` calls no locked
-  tool — nesting would deadlock permanently, since `flock` is per open file
-  description. It includes a six-process concurrent-write test, and the static
-  check was negative-controlled: removing the lock in a scratch copy makes it
-  fail with the right message.
+- **The dashboard Tickets badge matches the ticket view.** The badge used to
+  count only open tickets while the page showed every ticket. It now displays
+  the number of rows in that view; open work still controls the hot styling.
 
-- **Test fixtures no longer carry a real username or real ticket ids.** They
-  needed realistic-looking values because the property under test is that the
-  compressor preserves paths and IDs verbatim, and real ones had been used
-  instead of invented ones. `pyproject.toml` packages `["."]`, so they shipped
-  in the wheel. Now `/Users/example/...` and `TK-000000000000`.
+- **The compaction measurement helper reports an empty cold set honestly.** It
+  now lists every reason an entry can be exempt instead of claiming all entries
+  are pinned or high-priority.
 
-Upgrading is a drop-in: no schema change, no migration, no config change.
+- **CI covers the missing root-level regression suites.** Hot/cold ranking,
+  handoff pinning, and board-lock tests now run on every push and pull request.
+
+- **Fresh installs keep a compatible MCP SDK.** The dependency now excludes
+  MCP SDK 2.x, which removed the `mcp.server.fastmcp` import used by this
+  release. Existing MCP SDK 1.x installations are unaffected.
+
+- **Official MCP Registry metadata is included.** `server.json` describes the
+  published PyPI package, `stdio` transport, project icon, source repository,
+  and required `AGENT_PROJECT_DIR` filepath. The README carries the hidden PyPI
+  ownership marker. These are discovery and ownership metadata only; they do
+  not change the server's tools or runtime behavior.
+
+Upgrading is a drop-in: there is no board schema migration and no new runtime
+dependency. Ticket-file cleanup is forward-only; terminal files left in the
+open queue by an older release are not moved automatically.

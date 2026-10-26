@@ -57,6 +57,99 @@
 - Tool documentation lists the actual thirty tools and corrects assignment,
   submit/review session, compaction, and event-wait contracts.
 
+## v4.0.4
+
+Patch release. Terminal ticket files now agree with the ticket index, two
+operator-facing messages match the views they describe, and the package carries
+the metadata needed for the official MCP Registry.
+
+### Fixed
+
+- **Canceled and terminated tickets now leave the open queue.** The ticket
+  index already marked these states as terminal, but their Markdown files stayed
+  under `tickets/`, while approved tickets moved to `tickets/closed/`. New
+  cancel and terminate operations now write the terminal record under
+  `tickets/closed/`, remove the open-queue copy, and carry any submission file
+  out of `tickets/review/`. The tool response reports the filed path. This is
+  forward-only: files left behind by earlier releases are not moved
+  automatically.
+
+- **The dashboard Tickets badge now counts the rows in the view it opens.** It
+  previously showed only open tickets while the page listed the complete ticket
+  history. Open tickets still control the badge's hot styling.
+
+- **An empty compaction candidate set is reported accurately.** The measurement
+  helper now says `EMPTY COLD SET` and lists all exemption reasons: pinned,
+  inside `AGENT_MEM_HOT_HOURS`, or within `AGENT_MEM_MAX_HOT`. It no longer
+  implies that every entry is pinned or high-priority.
+
+- **CI now runs all offline regression suites.** The hot/cold ranking, handoff
+  pinning, and board-lock tests were present at the repository root but missing
+  from the enumerated CI command.
+
+- **Clean installs stay on the compatible MCP SDK major version.** The package
+  now declares `mcp[cli]>=1.0.0,<2`; MCP SDK 2.x removed the
+  `mcp.server.fastmcp` import used by this release. Existing 1.x environments
+  are unchanged.
+
+### Changed
+
+- Added the PyPI ownership marker and root `server.json` for the official MCP
+  Registry. The manifest identifies the existing PyPI package and `stdio`
+  transport, and exposes `AGENT_PROJECT_DIR` as a required non-secret filepath.
+  It does not change the MCP protocol, tool behavior, installation model, or
+  runtime command.
+
+## v4.0.3
+
+Patch release. Two fixes to the hot/cold memory tiering, both found the same
+way: by watching the board throw away entries it had just been told to keep.
+
+### Fixed
+
+- **The hot-set overflow ranked on priority before recency, so new entries lost
+  their slots to old ones.** `_split_hot_cold` decides `is_recent` for every
+  entry, then — if more entries than `AGENT_MEM_MAX_HOT` survive that pass —
+  re-sorts by `(priority, timestamp)` and truncates. Priority dominates, so the
+  recency decision made ten lines earlier is discarded, and a brand-new
+  unpinned `priority: 0` entry sorts below every week-old `priority: 1` handoff
+  on the board.
+
+  This is why compaction ate the digest written for it. `memory_prepare_compaction`
+  tells the agent to summarise the cold set with
+  `memory_write(memory_type='context')`; that digest lands unpinned at priority
+  0, the overflow step drops it straight into COLD, and the `memory_compact`
+  call it was written for archives it along with the entries it summarised.
+  Reproduced twice on a live board by two different agents. Nothing was lost —
+  `memory_search_archive` still finds them — but the next agent reads hot
+  first, so a digest in the archive is a digest nobody reads.
+
+  Overflow now ranks `(pinned, in-hot-window, priority, timestamp)`. Pinned
+  still never loses a slot, entries inside `AGENT_MEM_HOT_HOURS` outrank stale
+  high-priority handoffs, and priority still orders within a tier. On a live
+  53-entry board the demoted set went from *[oldest handoff, second-newest
+  entry]* to the three oldest handoffs.
+
+- **Every handoff ever written reserved a hot slot permanently.** Both handoff
+  writers hardcoded `priority: 3, pinned: True`. The live board carried 33
+  handoffs, 17 of them pinned, against a 50-slot budget — and with pinned now
+  ranking first in overflow, that reservation is absolute rather than merely
+  likely.
+
+  `pinned` on a handoff never meant "show me": `_latest_handoff_lines`, the
+  briefing's LATEST HANDOFF block and the onboard last-handoff line all select
+  by `memory_type` and recency, and both pinned lists explicitly exclude
+  handoffs. It only ever meant "do not compact me".
+
+  `memory_handoff` still pins, but now demotes the author's earlier handoffs
+  first, so the board keeps one pinned handoff per agent. The auto-handoff
+  written by `memory_submit_ticket` is now `priority: 1` and unpinned — it is a
+  routing notice that expires when the review lands, and 21 of the board's 33
+  handoffs were auto-generated. Forward-only, no backfill, keyed on
+  `agent_name` + `memory_type`: same rule and same shape as
+  `_demote_rejection_warnings`. Handoffs already on a board stay pinned until
+  their author writes another one, or `memory_unpin` clears them.
+
 ## v4.0.2
 
 Patch release. One concurrency fix and one hygiene fix, both found by running

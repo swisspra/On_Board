@@ -527,6 +527,34 @@ def _demote_rejection_warnings(mem: list, ticket_id: str, resolution: str, actor
         changed = True
     return changed
 
+def _demote_prior_handoffs(mem: list, agent_name: str, actor: str) -> int:
+    """Demote an agent's earlier pinned handoffs when it hands off again.
+
+    Only an agent's newest handoff is a live instruction; the ones before it
+    are history. Every handoff surface already selects by memory_type and
+    recency (_latest_handoff_lines, the briefing's LATEST HANDOFF block, the
+    onboard 'last handoff' line) and the pinned lists explicitly exclude
+    handoffs — so `pinned` on a handoff only ever meant 'do not compact me'.
+    Left unbounded it is a permanent hot-slot reservation: 33 handoffs, 17 of
+    them pinned, on a 50-slot board.
+
+    Keyed on agent_name + memory_type, never on the title string.
+
+    FORWARD-ONLY BY DESIGN, no backfill — same rule as
+    _demote_rejection_warnings. Handoffs already on the board stay pinned
+    until their author writes another one, or someone clears them with
+    memory_unpin.
+    """
+    demoted = 0
+    for entry in mem:
+        if entry.get("memory_type") != MemoryType.HANDOFF:
+            continue
+        if entry.get("agent_name") != agent_name or not entry.get("pinned"):
+            continue
+        _unpin_memory_entry(entry, actor, "superseded by a newer handoff")
+        demoted += 1
+    return demoted
+
 def _minutes_ago(ts: object) -> str:
     try:
         return f"{max(0, int((time.time() - float(ts)) // 60))}m"
@@ -865,10 +893,22 @@ def _split_hot_cold(memories: list) -> tuple:
         else:
             cold.append(m)
 
-    # If still too many hot, keep only the most recent MAX_HOT_ENTRIES
+    # If still too many hot, keep only the most recent MAX_HOT_ENTRIES.
+    # Rank: pinned first (never evicted), then entries inside the hot window,
+    # then priority, then recency. Ranking on priority alone demoted brand-new
+    # unpinned entries below week-old priority>=1 handoffs — which is how a
+    # freshly written compaction digest ended up in the cold set and was
+    # archived by the very memory_compact it was written for.
     if len(hot) > MAX_HOT_ENTRIES:
-        # Sort by priority desc then timestamp desc
-        hot.sort(key=lambda m: (m.get("priority", 0), m.get("timestamp", 0)), reverse=True)
+        hot.sort(
+            key=lambda m: (
+                1 if m.get("pinned") else 0,
+                1 if m.get("timestamp", 0) >= cutoff_time else 0,
+                m.get("priority", 0),
+                m.get("timestamp", 0),
+            ),
+            reverse=True,
+        )
         overflow = hot[MAX_HOT_ENTRIES:]
         hot = hot[:MAX_HOT_ENTRIES]
         cold = overflow + cold
@@ -1658,6 +1698,8 @@ async def memory_handoff(params: HandoffInput) -> str:
     if params.files_modified: content += "\n## Modified\n" + "\n".join(f"- `{f}`" for f in params.files_modified) + "\n"
     if params.files_created: content += "\n## Created\n" + "\n".join(f"- `{f}`" for f in params.files_created) + "\n"
     mem = _load_mem()
+    # This handoff supersedes the author's previous one; keep one pinned per agent.
+    superseded = _demote_prior_handoffs(mem, params.agent_name, params.agent_name)
     entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": MemoryType.HANDOFF,
              "title": f"Handoff from {params.agent_name}", "content": content,
              "tags": ["handoff"], "related_files": (params.files_modified or [])+(params.files_created or []),
@@ -1668,7 +1710,8 @@ async def memory_handoff(params: HandoffInput) -> str:
         if a.get("agent_name") == params.agent_name and a.get("status") == AgentStatus.ACTIVE:
             a["status"] = AgentStatus.HANDED_OFF; a["handed_off_at"] = _now(); break
     _save_agt(agents)
-    return f"🤝 Handoff from `{params.agent_name}` — {len(params.next_steps)} next steps, {len(params.warnings or [])} warnings"
+    note = f" (superseded {superseded} earlier handoff{'s' if superseded != 1 else ''})" if superseded else ""
+    return f"🤝 Handoff from `{params.agent_name}` — {len(params.next_steps)} next steps, {len(params.warnings or [])} warnings{note}"
 
 @mcp.tool(name="memory_get_briefing", annotations={"title":"Get Full Briefing","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 async def memory_get_briefing(params: BriefingInput) -> str:
@@ -2956,6 +2999,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
 
             # Write handoff memory
             mem = _load_mem()
+            _demote_prior_handoffs(mem, params.agent_name, params.agent_name)
             mem.append(_finalize_memory_entry({
                 "id": _id(), "agent_name": params.agent_name,
                 "memory_type": MemoryType.HANDOFF,
@@ -2969,7 +3013,11 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
                 ),
                 "tags": ["handoff", "ticket", "auto"],
                 "related_files": params.files_changed or [],
-                "priority": 3, "pinned": True,
+                # Unpinned, unlike a hand-written handoff: this is a routing
+                # notice ("a reviewer is needed"), and it stops mattering once
+                # the review lands. Pinning it reserved a hot slot forever —
+                # 21 of the board's 33 handoffs are auto-generated.
+                "priority": 1, "pinned": False,
                 "created_at": _now(), "timestamp": time.time()
             }))
             _save_mem(mem)
@@ -3168,6 +3216,29 @@ async def memory_review_ticket(params: ReviewTicketInput) -> str:
     return f"Ticket `{params.ticket_id}` not found."
 
 
+def _retire_ticket_files(ticket: dict) -> str:
+    """Move a terminal ticket out of the open queue and return its new path.
+
+    Approval already did this — memory_review_ticket moves the ticket md and
+    the submission into closed/. Cancel and terminate only rewrote the md in
+    place, so `tickets/`, documented as the open queue, accumulated dead
+    tickets: five of them on the live board, and every cancel re-asserted the
+    file there. The index was right and the directory was wrong, which reads
+    worse than either being wrong alone.
+    """
+    tdir = _tickets_dir()
+    dest = tdir / "closed"
+    dest.mkdir(exist_ok=True)
+    _write_ticket_md(dest / f"{ticket['id']}.md", ticket)
+    stale = tdir / f"{ticket['id']}.md"
+    if stale.exists():
+        stale.unlink()
+    submit = tdir / "review" / f"{ticket['id']}-submit.md"
+    if submit.exists():
+        shutil.move(str(submit), str(dest / submit.name))
+    return f"tickets/closed/{ticket['id']}.md"
+
+
 @mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
 @_with_board_lock
 async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
@@ -3193,8 +3264,9 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
             mem = _load_mem()
             if _demote_rejection_warnings(mem, t["id"], "canceled", agent_name):
                 _save_mem(mem)
-            _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
-            return f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
+            path = _retire_ticket_files(t)
+            return (f"🚫 Ticket `{ticket_id}` canceled by `{agent_name}` ({basis}).\nFiled at `{path}`."
+                    + (f"\nReason: {reason}" if reason else ""))
     return f"Ticket `{ticket_id}` not found."
 
 
@@ -3223,8 +3295,9 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
             mem = _load_mem()
             if _demote_rejection_warnings(mem, t["id"], "terminated", agent_name):
                 _save_mem(mem)
-            _write_ticket_md(_tickets_dir() / f"{t['id']}.md", t)
-            return f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis})." + (f"\nReason: {reason}" if reason else "")
+            path = _retire_ticket_files(t)
+            return (f"⛔ Ticket `{ticket_id}` terminated by `{agent_name}` ({basis}).\nFiled at `{path}`."
+                    + (f"\nReason: {reason}" if reason else ""))
     return f"Ticket `{ticket_id}` not found."
 
 
