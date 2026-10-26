@@ -99,10 +99,10 @@ pipx or uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's
 and run from a clone using the setup paths below. (On Homebrew 6+, approve the
 one-time tap-trust prompt, or run `brew trust swisspra/tap`.)
 
-The development runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
-API. The lockfile selects MCP 2.3.0; SDK 1.x is no longer supported by this
-source tree. Minimum AnyIO, PyJWT, and cryptography versions also prevent
-installers from retaining known-vulnerable transitive dependencies.
+The v4.1.0 runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
+API. The lockfile selects MCP 2.3.0; SDK 1.x is no longer supported.
+Minimum AnyIO, PyJWT, and cryptography versions also prevent installers from
+retaining known-vulnerable transitive dependencies.
 
 #### Headless config (no clone)
 
@@ -366,7 +366,7 @@ files an audit can read.
 
 ---
 
-## Current status (v4.0.4, August 2026)
+## Current status (v4.1.0)
 
 The current local setup is built around one central On Board checkout and one
 project-selected memory folder:
