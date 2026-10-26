@@ -710,13 +710,11 @@ def test_inherited_git_routing_cannot_bypass_tracked_configuration(tmp_path, mon
 
 @NEEDS_GIT
 @SUPPORTED_SETUP
-def test_unknown_git_ignore_status_blocks_writes(tmp_path):
+def test_unknown_git_ignore_status_blocks_writes(tmp_path, monkeypatch, capsys):
+    helper = load_helper()
     project = tmp_path / "unreadable ignore rules"
     project.mkdir()
     assert git(project, "init", "-q").returncode == 0
-    exclude = project / ".git" / "info" / "exclude"
-    exclude.unlink()
-    exclude.mkdir()
     (project / ".mcp.json").write_bytes(b'{"mcpServers": {"other": {"command": "keep"}}}\n')
     (project / ".gitignore").write_bytes(b"*.log\n")
     memory = project / ".agent-mem"
@@ -724,10 +722,23 @@ def test_unknown_git_ignore_status_blocks_writes(tmp_path):
     (memory / "watch-sentinel.json").write_bytes(b'{"cursor": "preserve"}\n')
     before = outside_snapshot(project)
 
-    result = invoke(project, "claude-code", executable(tmp_path))
+    real_run = subprocess.run
 
-    assert result.returncode == 2, result.stdout + result.stderr
-    report = json.loads(result.stdout)
+    def fail_ignore_query(args, **kwargs):
+        if "check-ignore" in args:
+            return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: cannot read ignore rules")
+        return real_run(args, **kwargs)
+
+    # Git for Windows can tolerate directory-valued exclude files. Model the
+    # actual I/O boundary failure, not platform-specific filesystem behavior.
+    monkeypatch.setattr(helper.subprocess, "run", fail_ignore_query)
+    result = helper.main([
+        "--project", str(project), "--client", "claude-code",
+        "--command", str(executable(tmp_path)),
+    ])
+
+    report = json.loads(capsys.readouterr().out)
+    assert result == 2, report
     assert report["status"] == "conflict"
     assert report["changed"] is False
     assert outside_snapshot(project) == before

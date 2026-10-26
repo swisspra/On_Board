@@ -40,6 +40,9 @@
   tracked-configuration consent boundary.
 - If Git cannot determine whether generated project files are ignored, setup
   stops before writing native configuration, ignore rules, or memory.
+- The Git-ignore failure regression uses a portable query-error boundary instead
+  of assuming POSIX exclude-file behavior on Windows; the no-write requirement
+  is unchanged.
 - Native watcher tasks are cancelled and joined on shutdown. Distribution
   checks reject unexpected source-archive members as well as wheel contents.
 
