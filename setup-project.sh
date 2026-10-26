@@ -295,10 +295,17 @@ else
     echo "⚠️  uv not found — using existing .venv"
 fi
 
-if TOOLS=$(PYTHONPATH="$SCRIPT_DIR" "$ONBOARD_PY" -c "
+if TOOLS=$("$ONBOARD_PY" - "$SCRIPT_DIR" <<'PY' 2>/dev/null
+import asyncio
+import sys
+
+sys.path.insert(0, sys.argv[1])
+
 from server import mcp
-print(len(mcp._tool_manager._tools))
-" 2>/dev/null); then
+
+print(len(asyncio.run(mcp.list_tools())))
+PY
+); then
     echo "✅ On Board server import OK ($TOOLS tools)"
 else
     echo "❌ On Board server import failed"

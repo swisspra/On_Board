@@ -1,6 +1,8 @@
 import asyncio
 import importlib.util
+import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -1042,7 +1044,7 @@ def test_server_icons_declared_only_when_the_asset_exists(tmp_path):
         server._ICON_PATH = real
         icons = server._server_icons()
         assert icons and icons[0].src.startswith("data:image/png;base64,")
-        assert icons[0].mimeType == "image/png"
+        assert icons[0].mime_type == "image/png"
     finally:
         server._ICON_PATH = original
 
@@ -1359,3 +1361,91 @@ def test_rejection_skips_existing_attempt_and_preserves_legacy_files(tmp_path):
     ticket = next(t for t in server._load_ticket_index() if t["id"] == "TK-collision")
     assert ticket["rejection_count"] == 2
     assert ticket["status"] == "open"
+
+
+def _activate_agent(server, agent_name):
+    server._save_agt({"a1": {"agent_name": agent_name, "agent_platform": "codex",
+                             "agent_role": "main", "status": "active",
+                             "memories_written": 0, "last_activity": time.time()}})
+
+
+def _checkpoint_files(server):
+    return sorted((server.MEMORY_DIR / "checkpoints").glob("*.json"))
+
+
+def test_checkpoint_traversal_cannot_escape_the_project(tmp_path):
+    """A crafted agent name must not steer the checkpoint file out of the board.
+
+    `owner/../../../../escaped` used to become the raw filename and walk up out
+    of `.agent-mem/checkpoints/`, dropping a JSON file above the project root.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    server = load_server(project)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    _activate_agent(server, "owner/../../../../escaped")
+
+    out = asyncio.run(server.memory_checkpoint(server.CheckpointInput(
+        agent_name="owner/../../../../escaped", summary="escape attempt")))
+
+    assert "Checkpoint" in out, out
+    assert list(tmp_path.glob("escaped*.json")) == []
+    assert list(project.glob("escaped*.json")) == []
+    files = _checkpoint_files(server)
+    assert len(files) == 1, files
+    assert "/" not in files[0].name and "\\" not in files[0].name
+    assert files[0].resolve().parent == (server.MEMORY_DIR / "checkpoints").resolve()
+    # The checkpoint itself is not lost: the memory entry is still written.
+    assert [m["memory_type"] for m in server._load_mem()] == ["checkpoint"]
+
+
+def test_checkpoint_filenames_keep_aliasing_identities_apart(tmp_path):
+    """`a/b` and `a_b` slug to the same safe name; the entry id must separate them."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    for name in ("a/b", "a_b"):
+        _activate_agent(server, name)
+        asyncio.run(server.memory_checkpoint(server.CheckpointInput(
+            agent_name=name, summary=f"from {name}")))
+
+    files = _checkpoint_files(server)
+    assert len(files) == 2, [f.name for f in files]
+    assert {json.loads(f.read_text())["summary"] for f in files} == {"from a/b", "from a_b"}
+
+
+def test_checkpoint_refuses_a_checkpoints_symlink_out_of_the_project(tmp_path):
+    """A `checkpoints/` symlink out of the project must not receive board state.
+
+    The refusal happens before any write: the seeded memory and the agent record
+    must come back byte-identical and no checkpoint entry may appear, so a
+    rejection can never look like a successful or partial checkpoint.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    server = load_server(project)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    _activate_agent(server, "codex-main")
+    server._save_mem([{"id": "m1", "agent_name": "codex-main", "memory_type": "decision",
+                       "title": "prior knowledge", "content": "must survive", "timestamp": 1.0}])
+    checkpoints = server.MEMORY_DIR / "checkpoints"
+    checkpoints.rmdir()  # _ensure() created the real dir; replace it with the plant
+    checkpoints.symlink_to(outside, target_is_directory=True)
+    mem_before = server._mem_p().read_bytes()
+    agt_before = server._agt_p().read_bytes()
+
+    out = asyncio.run(server.memory_checkpoint(server.CheckpointInput(
+        agent_name="codex-main", summary="planted symlink")))
+
+    assert list(outside.iterdir()) == []
+    assert "outside the project" in out, out
+    assert server._mem_p().read_bytes() == mem_before
+    assert server._agt_p().read_bytes() == agt_before
+    assert [m["memory_type"] for m in server._load_mem()] == ["decision"]
+
+
+def test_memory_ids_stay_twelve_lowercase_hex(tmp_path):
+    """IDs appear in filenames and cross-links, so their shape is a contract."""
+    server = load_server(tmp_path)
+    assert re.fullmatch(r"[0-9a-f]{12}", server._id())

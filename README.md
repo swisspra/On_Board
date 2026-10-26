@@ -99,9 +99,10 @@ pipx or uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's
 and run from a clone using the setup paths below. (On Homebrew 6+, approve the
 one-time tap-trust prompt, or run `brew trust swisspra/tap`.)
 
-The Python runtime requires `mcp[cli]>=1.28.1,<2`. MCP SDK 2.x removed the
-`mcp.server.fastmcp` API used here; let the installer resolve the supported 1.x
-SDK rather than independently upgrading it to 2.x.
+The development runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
+API. The lockfile selects MCP 2.3.0; SDK 1.x is no longer supported by this
+source tree. Minimum AnyIO, PyJWT, and cryptography versions also prevent
+installers from retaining known-vulnerable transitive dependencies.
 
 #### Headless config (no clone)
 

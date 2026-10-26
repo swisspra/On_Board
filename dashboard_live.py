@@ -3,8 +3,10 @@
 Agent Memory LIVE Dashboard — emits a self-refreshing HTML shell that polls
 the raw .agent-mem/*.json files via fetch() and re-renders in place.
 
-Run it once, serve the folder via python3 -m http.server, and watch the
-dashboard update itself every few seconds without re-running Python.
+Run it once with --serve (or --open), then watch the dashboard update itself
+every few seconds without re-running Python. The built-in server is a loopback
+-only HTTP server confined to the selected .agent-mem/ board directory; use it
+instead of python3 -m http.server, which would expose the whole folder tree.
 
 Usage:
   python3 dashboard_live.py                        <- uses AGENT_PROJECT_DIR or cwd
@@ -1202,10 +1204,58 @@ print()
 
 # -- Optional: serve + open --------------------------------------------------
 if "--serve" in flags or "--open" in flags:
-    import subprocess, webbrowser, time, threading
+    import functools
+    import http.server
+    import threading
+    import time
+    import webbrowser
 
-    url = f"http://localhost:{PORT}/dashboard-live.html"
-    print(f"Serving {MEMORY_DIR} on port {PORT}")
+    # Canonical board root: the in-process loopback server below only ever
+    # serves paths that resolve inside the selected .agent-mem/ directory.
+    # Symlinks (plain files, external directories, or index.html/index.htm)
+    # that resolve outside this root are refused for both GET and HEAD, so the
+    # confined server cannot be turned into a read primitive for the rest of
+    # the filesystem the way `python3 -m http.server` can.
+    SERVE_ROOT = MEMORY_DIR.resolve()
+
+    def _resolve_within_root(path):
+        """Return the canonical path if it stays inside SERVE_ROOT, else None."""
+        try:
+            resolved = Path(path).resolve()
+        except OSError:
+            return None
+        if resolved == SERVE_ROOT or SERVE_ROOT in resolved.parents:
+            return resolved
+        return None
+
+    class _ConfinedHandler(http.server.SimpleHTTPRequestHandler):
+        def send_head(self):
+            requested = Path(self.translate_path(self.path))
+            if _resolve_within_root(requested) is None:
+                self.send_error(403, "Forbidden")
+                return None
+            if requested.is_dir():
+                # Prechecking the requested directory is not enough: a real
+                # in-root directory may still hold an index.html/index.htm
+                # symlink that escapes the root and would be served by super().
+                for index in ("index.html", "index.htm"):
+                    candidate = requested / index
+                    if (candidate.is_symlink() or candidate.is_file()) and \
+                            _resolve_within_root(candidate) is None:
+                        self.send_error(403, "Forbidden")
+                        return None
+            return super().send_head()
+
+    handler = functools.partial(_ConfinedHandler, directory=str(SERVE_ROOT))
+    try:
+        httpd = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), handler)
+    except OSError as exc:
+        print(f"ERROR: cannot bind 127.0.0.1:{PORT} ({exc})")
+        sys.exit(1)
+
+    bound_port = httpd.server_address[1]
+    url = f"http://localhost:{bound_port}/dashboard-live.html"
+    print(f"Serving {SERVE_ROOT} on port {bound_port} (loopback only)")
     print(f"    URL: {url}")
     print("    Press Ctrl+C to stop.")
     print()
@@ -1217,16 +1267,16 @@ if "--serve" in flags or "--open" in flags:
         threading.Thread(target=_open, daemon=True).start()
 
     try:
-        subprocess.run(
-            ["python3", "-m", "http.server", str(PORT), "--bind", "127.0.0.1"],
-            cwd=str(MEMORY_DIR),
-        )
+        httpd.serve_forever()
     except KeyboardInterrupt:
         print("\nServer stopped.")
+    finally:
+        httpd.server_close()
 else:
     print("    To view live, run ONE of:")
     print(f"      python3 {Path(__file__).name} {PROJECT_ROOT} --open        <- auto-serve + open browser")
     print(f"      python3 {Path(__file__).name} {PROJECT_ROOT} --serve       <- serve only")
-    print("    Or manually:")
-    print(f"      cd {MEMORY_DIR} && python3 -m http.server {PORT}")
-    print(f"      open http://localhost:{PORT}/dashboard-live.html")
+    print(f"    Both start the built-in loopback server confined to {MEMORY_DIR}.")
+    print("    Do not 'cd' into that folder and run 'python3 -m http.server':")
+    print("    that would expose the whole directory tree, including symlinks")
+    print("    pointing outside the board.")

@@ -15,7 +15,7 @@ Design principles:
 Supports: Claude, Cursor, Codex, Claude Code, AntiGravity, any MCP client.
 """
 
-import json, os, time, hashlib, math, re, base64
+import json, os, time, secrets, math, re, base64
 import asyncio, functools, contextlib
 try:
     import fcntl                      # POSIX only
@@ -27,7 +27,8 @@ from enum import Enum
 from pathlib import Path
 
 from pydantic import BaseModel, Field, ConfigDict
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
+from mcp_types import Icon, ToolAnnotations
 
 import a2a_wait
 import ticket_roles
@@ -127,13 +128,9 @@ def _server_icons():
 
     No placeholder is invented. If the asset is absent we declare nothing, which
     is honest; dropping a real 128x128 PNG at the path above is the only step
-    needed later. Note the installed SDK's Icon has no `theme` field, so one
-    file must read on both light and dark backgrounds.
+    needed later. `theme` is left unset so the icon is declared as suitable for
+    any theme, which means one file must read on both light and dark backgrounds.
     """
-    try:
-        from mcp.types import Icon
-    except ImportError:
-        return None
     if not _ICON_PATH.is_file():
         return None
     try:
@@ -141,10 +138,10 @@ def _server_icons():
     except OSError:
         return None
     return [Icon(src=f"data:image/png;base64,{payload}",
-                 mimeType="image/png", sizes=["128x128"])]
+                 mime_type="image/png", sizes=["128x128"])]
 
 
-mcp = FastMCP("onboard_memory_mcp", website_url=_HOMEPAGE, icons=_server_icons())
+mcp = MCPServer("onboard_memory_mcp", website_url=_HOMEPAGE, icons=_server_icons())
 
 # ── Enums ───────────────────────────────────────────────
 class MemoryType(str, Enum):
@@ -322,7 +319,7 @@ def _local_now() -> datetime:
     return datetime.now().astimezone()
 
 def _now(): return _local_now().isoformat()
-def _id(): return hashlib.md5(f"{time.time()}-{os.urandom(8).hex()}".encode()).hexdigest()[:12]
+def _id(): return secrets.token_hex(6)
 
 # Paths
 def _mem_p(): return MEMORY_DIR / "memories.json"
@@ -1310,7 +1307,7 @@ def _format_compact_onboard(params: OnboardInput, aid: str, rejoined: bool, agen
     ])
     return "\n".join(lines)
 
-@mcp.tool(name="memory_init", annotations={"title":"Initialize Project Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_init", annotations=ToolAnnotations(title="Initialize Project Memory", read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 @_with_board_lock
 async def memory_init(params: ProjectInitInput) -> str:
     """Initialize .agent-mem/ in the project root. Call once per project. Safe to re-call."""
@@ -1322,7 +1319,7 @@ async def memory_init(params: ProjectInitInput) -> str:
     _save_prj(prj); _save_mem([]); _save_agt({}); _save_sta({})
     return f"✅ Initialized at `{MEMORY_DIR}`\n**Project**: {PROJECT_ROOT.name}\n**Description**: {params.description}\n**Tech**: {params.tech_stack or 'N/A'}\n\nNext: `memory_onboard`"
 
-@mcp.tool(name="memory_agent_join", annotations={"title":"Register as Active Agent","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_agent_join", annotations=ToolAnnotations(title="Register as Active Agent", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_agent_join(params: AgentJoinInput) -> str:
     """Register as an active agent.
@@ -1390,7 +1387,7 @@ async def memory_agent_join(params: AgentJoinInput) -> str:
               "4. `memory_handoff` — before leaving", f"5. Always use agent_name=`{params.agent_name}`"]
     return "\n".join(lines)
 
-@mcp.tool(name="memory_onboard", annotations={"title":"On Board Agent Session","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_onboard", annotations=ToolAnnotations(title="On Board Agent Session", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 async def memory_onboard(params: OnboardInput) -> str:
     """Compact session entrypoint: join, collision-check, and show current working context."""
     if not _load_prj():
@@ -1411,7 +1408,7 @@ async def memory_onboard(params: OnboardInput) -> str:
         )
     return _format_compact_onboard(params, aid, rejoined, agents)
 
-@mcp.tool(name="memory_write", annotations={"title":"Write Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_write", annotations=ToolAnnotations(title="Write Memory", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 # memory_write read-modify-writes memories.json; tmp+rename makes only the
 # swap atomic, not the RMW, so two concurrent writers can lose one. Observed
 # live 2026-07-31: a write timed out and had to be checked with memory_search
@@ -1476,7 +1473,7 @@ async def memory_write(params: MemoryWriteInput) -> str:
     retract_line = f"\n↩️ Retracted `{retracted['id']}`" if retracted else ""
     return f"{e} Saved `{entry['id']}` by **{params.agent_name}** | {params.memory_type.value} | {'🔴'*priority or '⚪'}\n**{params.title}**{link_line}{summary_line}{retract_line}"
 
-@mcp.tool(name="memory_unpin", annotations={"title":"Unpin Memory","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_unpin", annotations=ToolAnnotations(title="Unpin Memory", read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 @_with_board_lock
 async def memory_unpin(params: MemoryUnpinInput) -> str:
     """Unpin a memory without deleting it, preserving the audit record."""
@@ -1491,7 +1488,7 @@ async def memory_unpin(params: MemoryUnpinInput) -> str:
     _save_mem(mem)
     return f"🔓 Unpinned `{target['id']}` — **{target.get('title', 'Untitled')}**; entry retained."
 
-@mcp.tool(name="memory_read", annotations={"title":"Read Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_read", annotations=ToolAnnotations(title="Read Memories", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_read(params: MemoryReadInput) -> str:
     """Read memories with filters. Filter by agent_name to trace who wrote what."""
     mem = _load_mem()
@@ -1514,7 +1511,7 @@ async def memory_read(params: MemoryReadInput) -> str:
         lines.append("---\n")
     return "\n".join(lines)
 
-@mcp.tool(name="memory_search", annotations={"title":"Search Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_search", annotations=ToolAnnotations(title="Search Memories", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_search(params: SearchInput) -> str:
     """Search across all memories with local relevance ranking."""
     mem = _load_mem()
@@ -1534,7 +1531,7 @@ async def memory_search(params: SearchInput) -> str:
         lines.append("---\n")
     return "\n".join(lines)
 
-@mcp.tool(name="memory_search_vector", annotations={"title":"Vector-style Search Memories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_search_vector", annotations=ToolAnnotations(title="Vector-style Search Memories", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_search_vector(params: VectorSearchInput) -> str:
     """Optional vector-style search. Disabled by default; JSON remains canonical."""
     backend = params.backend or VectorBackend(VECTOR_BACKEND if VECTOR_BACKEND in {b.value for b in VectorBackend} else "none")
@@ -1563,7 +1560,7 @@ async def memory_search_vector(params: VectorSearchInput) -> str:
         lines.append("---\n")
     return "\n".join(lines)
 
-@mcp.tool(name="memory_links", annotations={"title":"View Memory Linkage","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_links", annotations=ToolAnnotations(title="View Memory Linkage", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_links(params: MemoryLinksInput) -> str:
     """Show ticket, file, agent, and tag relationships across memory entries."""
     memories = _load_mem()
@@ -1666,27 +1663,61 @@ async def memory_links(params: MemoryLinksInput) -> str:
         return "No memory links found."
     return "\n".join(lines).rstrip()
 
-@mcp.tool(name="memory_checkpoint", annotations={"title":"Save Checkpoint","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+def _checkpoint_file(agent_name: str, entry_id: str) -> Optional[Path]:
+    """Path for this checkpoint's standalone file, or None when it would escape.
+
+    `agent_name` is caller-controlled, so the raw name must never reach the
+    filename: `owner/../../../../escaped` walks the join out of
+    `.agent-mem/checkpoints/` and drops project state anywhere on disk. The name
+    is therefore reduced to a filesystem-safe slug (the same helper the watch
+    files use) and combined with the entry id, so two distinct identities that
+    slug to the same name — `a/b` and `a_b` — still get separate files.
+
+    `checkpoints/` itself can be a symlink out of the project, shipped or left by
+    an earlier run, and `_save` follows it. The resolved directory is therefore
+    required to stay inside the canonical memory dir before anything is written.
+    This is a containment check for this writer, not a TOCTOU guarantee against a
+    hostile filesystem writer.
+    """
+    checkpoints = MEMORY_DIR / "checkpoints"
+    try:
+        base = MEMORY_DIR.resolve()
+        target = checkpoints.resolve()
+    except OSError:
+        return None
+    if base not in target.parents:
+        return None
+    stamp = _local_now().strftime("%Y%m%d_%H%M%S")
+    return target / f"cp_{_safe_agent_fname(agent_name)}_{entry_id}_{stamp}.json"
+
+@mcp.tool(name="memory_checkpoint", annotations=ToolAnnotations(title="Save Checkpoint", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_checkpoint(params: CheckpointInput) -> str:
-    """Full state checkpoint. Do every 10-15 min or before risky ops. Saves both as memory entry AND standalone file."""
+    """Full state checkpoint. Do every 10-15 min or before risky ops. Saves both as memory entry AND standalone file; rejected outright if `.agent-mem/checkpoints` resolves outside the project."""
     err = _require_joined(params.agent_name)
     if err: return err
+    # Resolve the id and confined path BEFORE any write: a symlinked
+    # `checkpoints/` must be refused without a heartbeat bump or a partial
+    # checkpoint entry, so a rejection can never masquerade as success.
+    entry_id = _id()
+    cp_file = _checkpoint_file(params.agent_name, entry_id)
+    if cp_file is None:
+        return ("⛔ Checkpoint rejected: `.agent-mem/checkpoints` resolves outside the "
+                "project memory directory. No checkpoint memory entry or standalone file "
+                "was written; existing data and heartbeat are unchanged.")
     _touch_heartbeat(params.agent_name)
     cpd = {"summary": params.summary, "remaining_tasks": params.remaining_tasks or [],
            "active_branch": params.active_branch, "blockers": params.blockers or [], "state": _load_sta()}
     mem = _load_mem()
-    entry = {"id": _id(), "agent_name": params.agent_name, "memory_type": MemoryType.CHECKPOINT,
+    entry = {"id": entry_id, "agent_name": params.agent_name, "memory_type": MemoryType.CHECKPOINT,
              "title": f"Checkpoint: {params.summary[:80]}", "content": json.dumps(cpd, indent=2, default=str),
              "tags": ["checkpoint"], "related_files": [], "priority": 2, "pinned": True,
              "created_at": _now(), "timestamp": time.time()}
     mem.append(_finalize_memory_entry(entry)); _save_mem(mem)
-    ts = _local_now().strftime("%Y%m%d_%H%M%S")
-    cp_file = MEMORY_DIR / "checkpoints" / f"cp_{params.agent_name}_{ts}.json"
     _save(cp_file, cpd)
     return f"💾 Checkpoint by `{params.agent_name}` — {len(params.remaining_tasks or [])} tasks left, {len(params.blockers or [])} blockers"
 
-@mcp.tool(name="memory_handoff", annotations={"title":"Handoff to Next Agent","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_handoff", annotations=ToolAnnotations(title="Handoff to Next Agent", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_handoff(params: HandoffInput) -> str:
     """Formal handoff. ALWAYS call before leaving. Next agent sees this first."""
@@ -1713,7 +1744,7 @@ async def memory_handoff(params: HandoffInput) -> str:
     note = f" (superseded {superseded} earlier handoff{'s' if superseded != 1 else ''})" if superseded else ""
     return f"🤝 Handoff from `{params.agent_name}` — {len(params.next_steps)} next steps, {len(params.warnings or [])} warnings{note}"
 
-@mcp.tool(name="memory_get_briefing", annotations={"title":"Get Full Briefing","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_get_briefing", annotations=ToolAnnotations(title="Get Full Briefing", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_get_briefing(params: BriefingInput) -> str:
     """CALL THIS FIRST. Token-aware briefing with workflow modes.
 
@@ -1961,7 +1992,7 @@ async def memory_get_briefing(params: BriefingInput) -> str:
               "⛔ If you skip steps, your work will be untracked and the next agent will redo everything."]
     return "\n".join(L)
 
-@mcp.tool(name="memory_status", annotations={"title":"Status","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_status", annotations=ToolAnnotations(title="Status", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_status() -> str:
     """Quick status dashboard."""
     async with _board_lock():
@@ -1982,7 +2013,7 @@ async def memory_status() -> str:
         l = mem[-1]; L.append(f"\n## Last: `{l['agent_name']}` [{l['memory_type']}] {l['title']}")
     return "\n".join(L)
 
-@mcp.tool(name="memory_doctor", annotations={"title":"Doctor Project Setup","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_doctor", annotations=ToolAnnotations(title="Doctor Project Setup", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_doctor() -> str:
     """Check project-local On Board setup without changing files."""
     checks = []
@@ -2055,7 +2086,7 @@ async def memory_doctor() -> str:
         lines.append("Setup looks complete. Use `memory_get_briefing(mode='brief')` for a quick runtime check.")
     return "\n".join(lines)
 
-@mcp.tool(name="memory_update_state", annotations={"title":"Update State","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_update_state", annotations=ToolAnnotations(title="Update State", read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 @_with_board_lock
 async def memory_update_state(params: UpdateStateInput) -> str:
     """Update shared key-value state. Stamped with agent_name."""
@@ -2070,7 +2101,7 @@ async def memory_update_state(params: UpdateStateInput) -> str:
 
 # ── Token-Saving Tools ──────────────────────────────────
 
-@mcp.tool(name="memory_compact", annotations={"title":"Compact Old Memories","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True})
+@mcp.tool(name="memory_compact", annotations=ToolAnnotations(title="Compact Old Memories", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True))
 @_with_board_lock
 async def memory_compact(params: CompactInput) -> str:
     """Compact old memories into compressed digests to save tokens.
@@ -2164,7 +2195,7 @@ async def memory_compact(params: CompactInput) -> str:
     )
 
 
-@mcp.tool(name="memory_token_usage", annotations={"title":"Token Usage Report","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_token_usage", annotations=ToolAnnotations(title="Token Usage Report", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_token_usage() -> str:
     """Show token usage breakdown and recommend compaction if needed.
 
@@ -2222,7 +2253,7 @@ async def memory_token_usage() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool(name="memory_prepare_compaction", annotations={"title":"Prepare Compaction (Agent-Driven)","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_prepare_compaction", annotations=ToolAnnotations(title="Prepare Compaction (Agent-Driven)", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_prepare_compaction() -> str:
     """Returns cold entries grouped by agent session — ready for YOU to summarize.
 
@@ -2284,7 +2315,7 @@ async def memory_prepare_compaction() -> str:
     return "\n".join(lines)
 
 
-@mcp.tool(name="memory_search_archive", annotations={"title":"Search Archive","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_search_archive", annotations=ToolAnnotations(title="Search Archive", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_search_archive(params: SearchInput) -> str:
     """Search the cold archive (compacted entries). Use when you need old details
     that were compressed out of the hot memory."""
@@ -2399,7 +2430,7 @@ def _detect_tech_stack(root: Path) -> str:
     if (root / "tsconfig.json").exists(): signals.append("TypeScript")
     return " / ".join(signals) if signals else "Unknown"
 
-@mcp.tool(name="memory_bootstrap", annotations={"title":"Bootstrap Existing Project","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_bootstrap", annotations=ToolAnnotations(title="Bootstrap Existing Project", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_bootstrap(params: BootstrapInput) -> str:
     """Bootstrap .agent-mem/ for an EXISTING project by auto-scanning the codebase.
@@ -2580,7 +2611,7 @@ class ContextDirReadInput(BaseModel):
     filename: str = Field(..., description="Filename or relative path to read from context dirs", min_length=1, max_length=500)
     max_chars: Optional[int] = Field(default=3000, description="Max characters to return", ge=100, le=50000)
 
-@mcp.tool(name="memory_context_dirs", annotations={"title":"List Context Directories","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_context_dirs", annotations=ToolAnnotations(title="List Context Directories", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_context_dirs() -> str:
     """List all configured external context/info directories and their files.
 
@@ -2614,7 +2645,7 @@ async def memory_context_dirs() -> str:
     lines.append("Use `memory_context_read(filename='...')` to read any file.")
     return "\n".join(lines)
 
-@mcp.tool(name="memory_context_read", annotations={"title":"Read from Context Dir","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_context_read", annotations=ToolAnnotations(title="Read from Context Dir", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_context_read(params: ContextDirReadInput) -> str:
     """Read a file from the external context directories.
 
@@ -2823,7 +2854,7 @@ def _ticket_control_permission(agent_name: str, ticket: dict, action: str) -> tu
     return False, allowed
 
 
-@mcp.tool(name="memory_create_ticket", annotations={"title":"Create Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_create_ticket", annotations=ToolAnnotations(title="Create Ticket", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_create_ticket(params: CreateTicketInput) -> str:
     """Create a ticket requesting help from another agent.
@@ -2880,7 +2911,7 @@ async def memory_create_ticket(params: CreateTicketInput) -> str:
     )
 
 
-@mcp.tool(name="memory_claim_ticket", annotations={"title":"Claim Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_claim_ticket", annotations=ToolAnnotations(title="Claim Ticket", read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 @_with_board_lock
 async def memory_claim_ticket(params: ClaimTicketInput) -> str:
     """Claim an open ticket (sets to claimed). Call again on a claimed ticket to advance to in_progress (e.g. when spawning a subagent)."""
@@ -2927,7 +2958,7 @@ async def memory_claim_ticket(params: ClaimTicketInput) -> str:
     return f"Ticket `{params.ticket_id}` not found."
 
 
-@mcp.tool(name="memory_submit_ticket", annotations={"title":"Submit Work for Review","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_submit_ticket", annotations=ToolAnnotations(title="Submit Work for Review", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     """Submit completed work on a ticket for review.
@@ -3040,7 +3071,7 @@ async def memory_submit_ticket(params: SubmitTicketInput) -> str:
     return f"Ticket `{params.ticket_id}` not found."
 
 
-@mcp.tool(name="memory_review_ticket", annotations={"title":"Review Submitted Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_review_ticket", annotations=ToolAnnotations(title="Review Submitted Ticket", read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 @_with_board_lock
 async def memory_review_ticket(params: ReviewTicketInput) -> str:
     """Review a submitted ticket. Approve → closed/ or Reject → rejected/.
@@ -3239,7 +3270,7 @@ def _retire_ticket_files(ticket: dict) -> str:
     return f"tickets/closed/{ticket['id']}.md"
 
 
-@mcp.tool(name="memory_cancel_ticket", annotations={"title":"Cancel Ticket","readOnlyHint":False,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_cancel_ticket", annotations=ToolAnnotations(title="Cancel Ticket", read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 @_with_board_lock
 async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
     """Cancel a ticket. Allowed: creator, claimer, or an active main/lead/reviewer agent."""
@@ -3270,7 +3301,7 @@ async def memory_cancel_ticket(agent_name: str, ticket_id: str, reason: str = ""
     return f"Ticket `{ticket_id}` not found."
 
 
-@mcp.tool(name="memory_terminate_ticket", annotations={"title":"Terminate Ticket","readOnlyHint":False,"destructiveHint":True,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_terminate_ticket", annotations=ToolAnnotations(title="Terminate Ticket", read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False))
 @_with_board_lock
 async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str = "") -> str:
     """Forcefully terminate a ticket at any stage. Creator or active main/reviewer only."""
@@ -3301,7 +3332,7 @@ async def memory_terminate_ticket(agent_name: str, ticket_id: str, reason: str =
     return f"Ticket `{ticket_id}` not found."
 
 
-@mcp.tool(name="memory_list_tickets", annotations={"title":"List Tickets","readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":False})
+@mcp.tool(name="memory_list_tickets", annotations=ToolAnnotations(title="List Tickets", read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False))
 async def memory_list_tickets(params: ListTicketsInput) -> str:
     """List tickets. Shows open/in_progress/in_review by default. Use include_closed for history."""
     # The auto-transition rewrites the index and the sweep rewrites agents.json,
@@ -3475,7 +3506,7 @@ class WaitForEventInput(BaseModel):
     idle_budget_min: Optional[int] = Field(default=15, description="Minutes of consecutive empty parks before the server answers STAND-DOWN instead of idle. Stated in minutes because that is what a human watching the loop counts. 0 or null listens indefinitely. The counter resets only on a real event, not on re-arming.")
 
 
-@mcp.tool(name="memory_wait_for_event", annotations={"title":"Wait for Board Event","readOnlyHint":True,"destructiveHint":False,"idempotentHint":False,"openWorldHint":False})
+@mcp.tool(name="memory_wait_for_event", annotations=ToolAnnotations(title="Wait for Board Event", read_only_hint=True, destructive_hint=False, idempotent_hint=False, open_world_hint=False))
 async def memory_wait_for_event(params: WaitForEventInput) -> str:
     """Park until another agent acts, then return everything pending.
 

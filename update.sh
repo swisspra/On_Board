@@ -139,11 +139,16 @@ fi
 
 # ── Step 2: Sync local environment ──
 source_tools() {
-    .venv/bin/python -c "
-import sys; sys.path.insert(0, '.')
+    .venv/bin/python - "$SCRIPT_DIR" <<'PY' 2>/dev/null
+import asyncio
+import sys
+
+sys.path.insert(0, sys.argv[1])
+
 from server import mcp
-print(len(mcp._tool_manager._tools))
-" 2>/dev/null
+
+print(len(asyncio.run(mcp.list_tools())))
+PY
 }
 
 SYNCED=0
@@ -394,15 +399,17 @@ for DEST in "${TARGETS[@]}"; do
         continue
     fi
 
-    if ! TOOLS=$(cd "$DEST" && "$DEST_PYTHON" -c '
+    if ! TOOLS=$(cd "$DEST" && "$DEST_PYTHON" - "$DEST" <<'PY' 2>&1
+import asyncio
 import sys
 
 sys.path.insert(0, sys.argv[1])
 
 from server import mcp
 
-print(len(mcp._tool_manager._tools))
-' "$DEST" 2>&1); then
+print(len(asyncio.run(mcp.list_tools())))
+PY
+); then
         echo "   ❌ Source copied to $DEST, but the server there failed to import:"
         printf '%s\n' "$TOOLS" | sed 's/^/      /'
         echo "   ↩ Backup: $BACKUP_DIR"

@@ -39,6 +39,7 @@ OLD_DEPLOYED_FILES = {
 }
 
 DEST_IMPORT_SCRIPT = """
+import asyncio
 import json
 import sys
 
@@ -52,7 +53,7 @@ import ticket_roles
 
 icons = server._server_icons()
 print(json.dumps({
-    "tools": len(server.mcp._tool_manager._tools),
+    "tools": len(asyncio.run(server.mcp.list_tools())),
     "files": {
         "server.py": server.__file__,
         "a2a_wait.py": a2a_wait.__file__,
@@ -89,8 +90,13 @@ def link_runtime(checkout):
         )
 
 
-def make_source(tmp_path, name="source"):
-    """Copy the repo to a temporary source checkout with no .git and a runtime."""
+def make_source(tmp_path, name="source's copy"):
+    """Copy the repo to a temporary source checkout with no .git and a runtime.
+
+    The default directory name carries an apostrophe: every setup/doctor/update
+    run has to pass the checkout path to Python without splicing it into Python
+    source, so a quote in the path is a deliberate regression case.
+    """
     src = tmp_path / name
     shutil.copytree(REPO_ROOT, src, ignore=SOURCE_SKIP, symlinks=True)
     link_runtime(src)
@@ -219,7 +225,7 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     registry = tmp_path / "linked-projects.json"
     env = make_env(tmp_path)
 
-    run(src, ["setup-project.sh", str(project)], env)
+    setup = run(src, ["setup-project.sh", str(project)], env)
     doctor = run(src, ["doctor.sh", str(project)], env)
     linked = run(src, ["setup-project.sh", "--list-linked"], env)
     linked_doctor = run(src, ["doctor.sh", "--all-linked"], env)
@@ -237,6 +243,8 @@ def test_setup_project_generates_dashboard_and_doctor_passes(tmp_path):
     assert dashboard.exists()
     assert registry.exists()
     assert os.access(dashboard, os.X_OK)
+    assert "server import OK (30 tools)" in setup.stdout
+    assert "Server import OK (30 tools)" in doctor.stdout
     assert "0 failed" in doctor.stdout
     assert str(project) in linked.stdout
     assert str(project) in linked_update.stdout
@@ -447,6 +455,7 @@ def test_update_deploys_runtime_payload_and_backs_up_previous_files(tmp_path):
 
     installed = import_from_destination(deployed)
     assert f"Updated ({installed['tools']} tools)" in updated.stdout
+    assert "uv synced without pruning extras (30 tools)" in updated.stdout
 
     for rel, old in OLD_DEPLOYED_FILES.items():
         assert (deployed / rel).read_bytes() == (src / rel).read_bytes(), rel

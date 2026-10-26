@@ -9,6 +9,14 @@
   content, and recorded compaction comparisons. It reports saved text, not
   inferred quota, provider usage, or time gained. Missing compression baselines
   remain unreported, and summaries larger than their source show growth.
+- Migrated the development runtime to the official MCP SDK 2.3.0 `MCPServer`
+  API, including snake_case Python models and public tool discovery in setup,
+  doctor, and update scripts. The thirty tools and two prompts are retained.
+  SDK 1.x is no longer supported by this source tree; no board migration is
+  required. These changes have not yet been published to PyPI.
+- Raised dependency minimums to patched AnyIO, PyJWT, and cryptography versions.
+  The lock selects MCP 2.3.0, AnyIO 4.15.1, PyJWT 2.15.1, and cryptography
+  50.0.2; the SDK 2 dependency graph no longer includes certifi.
 
 ### Obsoleted
 
@@ -21,10 +29,9 @@
 
 - Distribution archives now explicitly select the runtime modules and icon.
   Checkout tests, local boards, virtual environments, and scratch files no
-  longer enter the wheel or sdist. The MCP SDK dependency stays on supported
-  `mcp[cli]>=1.28.1,<2`; SDK 2.x removed the FastMCP import this server uses.
-  CI and release builds check archive contents and exercise a wheel-only
-  installation outside the checkout before uploading artifacts.
+  longer enter the wheel or sdist. CI and release builds check archive contents
+  and exercise a wheel-only installation outside the checkout before uploading
+  artifacts.
 - All shared board read-modify-write paths use the existing board lock,
   including checkpoints, handoffs, compaction, unpinning, state updates,
   bootstrap, heartbeats, and idle sweeps. Expired-claim transitions reload the
@@ -56,6 +63,20 @@
   f-string prefixes are removed without changing output.
 - Tool documentation lists the actual thirty tools and corrects assignment,
   submit/review session, compaction, and event-wait contracts.
+- Checkpoint filenames use sanitized agent names and a unique entry identifier
+  instead of caller-controlled path components. An escaping `checkpoints/`
+  directory symlink is rejected before checkpoint memory or heartbeat writes.
+  Existing checkpoint files remain untouched.
+- The dashboard's built-in HTTP server binds to loopback and confines reads
+  to the selected canonical memory directory. External file, directory, and
+  index symlinks are refused for GET and HEAD; ephemeral ports report their
+  actual bound port. The obsoleted dashboard design remains available.
+- Memory identifiers now use cryptographically secure random bytes while
+  retaining their twelve-character lowercase hexadecimal format.
+- GitHub Actions use immutable action commits and do not persist checkout
+  credentials. Pages build/deploy permissions are scoped per job, and CI
+  audits the hashed runtime dependency export without ignoring advisories.
+  The combined regression suite treats warnings as errors.
 
 ## v4.0.4
 
