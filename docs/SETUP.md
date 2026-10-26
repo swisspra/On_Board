@@ -292,13 +292,14 @@ Point your client at the installed command:
 
 The generic template is `configs/binary-mcp.json`.
 
-**Platform notes.** `pipx`/`uv` install from prebuilt wheels — no compiler
-needed — on **Python 3.11+** for Linux (x86_64/arm64), Windows (x86_64), and
-Apple-Silicon macOS. On **Python 3.10 or Intel macOS**, a couple of dependencies
-(`rpds-py`, `cryptography`) may build from source and need a C/Rust toolchain; on
-macOS or Linux you can instead use `brew install swisspra/tap/onboard-memory`, which
-builds against a pinned Python 3.12 and needs no preinstalled Python. Homebrew is
-not available on Windows.
+**Platform notes.** `pipx`/`uv` normally obtain prebuilt dependency wheels on
+supported **CPython 3.11+** platforms; availability varies by Python version and
+architecture. **Python 3.10 or Intel macOS** may need a C/Rust toolchain when a
+dependency has no compatible wheel. Homebrew builds against Python 3.12 and
+needs no preinstalled Python; its bottle builds target ARM macOS and x86_64
+Linux. Upstream Rust, OpenSSL 3, and Python 3.12 bottles are currently unavailable
+for Intel macOS, so do not assume Homebrew avoids source builds there.
+Homebrew is not available on Windows.
 
 Then initialize memory from your first chat (see
 [Initialize project memory](#initialize-project-memory)). `memory_init` creates

@@ -99,7 +99,7 @@ pipx or uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's
 and run from a clone using the setup paths below. (On Homebrew 6+, approve the
 one-time tap-trust prompt, or run `brew trust swisspra/tap`.)
 
-The v4.1.0 runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
+The v4.1.1 runtime uses `mcp[cli]>=2.3.0,<3` and the SDK's `MCPServer`
 API. The lockfile selects MCP 2.3.0; SDK 1.x is no longer supported.
 Minimum AnyIO, PyJWT, and cryptography versions also prevent installers from
 retaining known-vulnerable transitive dependencies.
@@ -134,9 +134,11 @@ checkout, no `setup-project.sh`:
 In your first chat, call `memory_init` once (creates `.agent-mem/`), then
 `memory_onboard` each session. Nothing to create by hand.
 
-The `pipx`/`uv` path installs from prebuilt wheels (no compiler) on Python 3.11+
-for Linux, Windows, and Apple-Silicon macOS; on Python 3.10 or Intel macOS a
-couple of Rust/C dependencies may build from source, so prefer `brew` there.
+The `pipx`/`uv` path normally uses prebuilt dependency wheels on supported
+CPython 3.11+ platforms. Wheel availability depends on Python and architecture;
+Python 3.10 or Intel macOS may need a C/Rust toolchain. Homebrew bottle builds
+target ARM macOS and x86_64 Linux. Upstream dependency bottles are currently
+unavailable for Intel macOS, so Homebrew is not a compiler-free fallback there.
 Template: [configs/binary-mcp.json](./configs/binary-mcp.json); full detail and
 platform notes in [docs/SETUP.md](./docs/SETUP.md).
 
@@ -366,7 +368,7 @@ files an audit can read.
 
 ---
 
-## Current status (v4.1.0)
+## Current status (v4.1.1)
 
 The current local setup is built around one central On Board checkout and one
 project-selected memory folder:
