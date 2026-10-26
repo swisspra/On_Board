@@ -268,10 +268,17 @@ check_executable "$ONBOARD_LAUNCHER" "On Board launcher: $ONBOARD_LAUNCHER"
 check_file "$ONBOARD_PY_LAUNCHER" "On Board Python launcher: $ONBOARD_PY_LAUNCHER"
 check_file "$SCRIPT_DIR/server.py" "On Board server.py"
 
-TOOLS=$(PYTHONPATH="$SCRIPT_DIR" "$ONBOARD_PY" -c "
+TOOLS=$("$ONBOARD_PY" - "$SCRIPT_DIR" <<'PY' 2>/dev/null
+import asyncio
+import sys
+
+sys.path.insert(0, sys.argv[1])
+
 from server import mcp
-print(len(mcp._tool_manager._tools))
-" 2>/dev/null)
+
+print(len(asyncio.run(mcp.list_tools())))
+PY
+)
 if [ -n "$TOOLS" ]; then
     pass "Server import OK ($TOOLS tools)"
 else

@@ -26,6 +26,9 @@ docs/*
 !docs/SETUP.md
 !docs/TOOLS.md
 !docs/A2A.md
+!docs/assets/
+!docs/assets/on-board-icon.png
+!docs/assets/a2a-transaction-sequence.jpg
 .cursorrules
 *.original.md
 *.original.*
