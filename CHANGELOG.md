@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v4.1.1
 
 ### Changed
 
@@ -8,7 +8,14 @@
   stable releases, including Pydantic 2.14.1, Uvicorn 0.54.0, and pytest 9.1.1.
   Python 3.10 remains supported with explicit resolver branches for dependencies
   whose newer releases require Python 3.11 or later. The package's runtime
-  requirements and published 4.1.0 distribution contents are unchanged.
+  requirements and tool APIs are unchanged.
+
+### Fixed
+
+- Corrected installation guidance that recommended Homebrew as a compiler-free
+  fallback on Intel macOS. Its upstream dependency bottles are currently absent;
+  the tap's actual bottle targets are ARM macOS and x86_64 Linux. Python wheel
+  availability also depends on interpreter version and architecture.
 
 ## v4.1.0
 

@@ -1,69 +1,40 @@
-# v4.1.0 — MCP SDK 2, safer runtime, and Memory footprint
+# v4.1.1 — Refreshed dependency locks and accurate install guidance
 
-This release brings the official MCP Python SDK 2.3.0 migration, patched runtime
-dependencies, complete installed-package payloads, and the board/dashboard
-repairs together. The public surface remains thirty tools and two prompts over
-stdio, with Python 3.10 or later. Existing board data needs no schema migration.
+This maintenance release refreshes the source checkout's locked runtime/test
+environment and corrects the installation guidance shipped in package metadata.
+The MCP SDK remains 2.3.0, with thirty tools, two prompts, and Python 3.10+.
+Runtime APIs and public dependency requirements are unchanged.
 
-## Runtime and security
+## Dependency refresh
 
-- Use the official `MCPServer` API and SDK2 models. Setup, doctor, and update
-  scripts discover tools through the public SDK API instead of private registry
-  internals. SDK1 is no longer supported by this release.
-- Require patched AnyIO, PyJWT, and cryptography versions. The lock selects MCP
-  2.3.0, AnyIO 4.15.1, PyJWT 2.15.1, and cryptography 50.0.2. SDK2 no longer
-  brings certifi into the runtime dependency graph.
-- Checkpoint filenames no longer use raw agent names as path components. An
-  external checkpoint-directory symlink is rejected before checkpoint memory or
-  heartbeat writes. Existing checkpoint files are retained.
-- The dashboard HTTP server binds to loopback and refuses file, directory, and
-  index symlinks that escape the selected canonical memory directory, for both
-  GET and HEAD. Port zero reports the actual bound port.
-- Memory identifiers use cryptographic randomness without changing their
-  twelve-character lowercase hexadecimal format.
+- Upgrade 22 locked packages to current compatible stable releases, including
+  Pydantic 2.14.1, pydantic-core 2.50.1, Uvicorn 0.54.0, pytest 9.1.1,
+  cffi 2.1.1, Typer 0.27.3, and updated validation/CLI dependencies.
+- Keep explicit Python 3.10 resolver branches where newer upstream versions
+  require Python 3.11 or later. The supported Python minimum is not raised.
+- Retain current MCP/mcp-types 2.3.0, AnyIO 4.15.1, PyJWT 2.15.1, and
+  cryptography 50.0.2. No advisory ignores or security-policy bypasses are added.
 
-## Board correctness and deployment
+## Installation guidance
 
-- Serialize shared board read-modify-write paths, heartbeats, and idle sweeps
-  under the board lock. Onboarding rendering and event-wait sleeps do not hold
-  that lock. Cross-process serialization still relies on POSIX `fcntl`; the
-  existing Windows multi-instance limitation is unchanged.
-- Match assignments against exact, case-sensitive stable agent names. Preserve
-  coordinator authority and the self-review gate.
-- Keep each rejected submission under its own immutable attempt directory.
-  Event waits detect a rejection-counter increase even when a fast cycle returns
-  the ticket to the same status, and await asynchronous heartbeat callbacks.
-- Build wheels from the source archive and ship only the seven runtime/icon
-  payload paths plus package metadata. Local boards, environments, tests, caches,
-  and scratch files stay outside published distributions.
-- Deploy all runtime sidecars and the icon, preserve backups, and fail clearly
-  when the destination cannot import the copied runtime. Paths containing
-  apostrophes remain supported.
+- Do not promise compiler-free installs independently of Python and architecture;
+  dependency wheel availability varies by platform.
+- Homebrew bottle builds target ARM macOS and x86_64 Linux. Upstream Rust,
+  OpenSSL 3, and Python 3.12 dependency bottles are currently unavailable for
+  Intel macOS, so Homebrew is not a compiler-free fallback there.
+- The platform-independent PyPI package remains available. Source builds may
+  require a C/Rust toolchain when a dependency has no matching wheel.
 
-## Dashboard
+## Verification and upgrade
 
-- **Memory footprint** replaces the active Quota saved view. It shows live,
-  digest, and archive text estimates, largest live entries, pinned content, and
-  recorded compaction comparisons. These are storage estimates, not billing,
-  provider quota, time gained, or measured session savings.
-- The previous design remains accessible through **View obsoleted design** with
-  an explicit **Obsoleted** warning and a return button.
-- All eleven ticket states are represented consistently, inactive claimers are
-  flagged through review, and terminated work is separate from cancellations.
-  Token estimates match the server's per-field Unicode-code-point calculation.
+The upgraded graph passed the full 184-test warning-strict suite on Python 3.10
+and 3.13, native scratch-board A2A checks (33/33 each), and multiprocess checks
+preserving every one of 36 writes on each interpreter. Complete third-party
+runtime/test advisory audits cover 42 installed packages on 3.10 and 40 on 3.13,
+with zero known vulnerabilities. Release builds also check archives and exercise
+fresh wheel-only installs outside the checkout.
 
-## Release checks
-
-CI treats test warnings as errors, audits the hashed locked runtime dependency
-set without ignoring advisories, validates archives, and exercises a fresh
-wheel-only installation outside the checkout. GitHub Actions use immutable
-commits and scoped permissions. CodeQL covers Python and Actions; the dashboard
-JavaScript test harness uses an HTML parser rather than tag-filtering regexes.
-
-## Upgrade
-
-Upgrade through your existing installation channel (`uv tool upgrade
-onboard-memory-mcp`, `pipx upgrade onboard-memory-mcp`, or Homebrew after its tap
-update). Source-checkout users can use the existing update workflow. No board
-schema migration, linked-project refresh, or data deletion runs automatically
-as part of this release.
+Upgrade through your existing installation channel. Source-checkout users pick
+up the new lock through the existing update workflow. This release does not
+rewrite 4.1.0, migrate board data, refresh linked projects, or change global
+configuration automatically.
