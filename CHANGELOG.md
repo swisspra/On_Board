@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Refreshed the locked runtime and test dependency graph to current compatible
+  stable releases, including Pydantic 2.14.1, Uvicorn 0.54.0, and pytest 9.1.1.
+  Python 3.10 remains supported with explicit resolver branches for dependencies
+  whose newer releases require Python 3.11 or later. The package's runtime
+  requirements and published 4.1.0 distribution contents are unchanged.
+
 ## v4.1.0
 
 ### Changed
