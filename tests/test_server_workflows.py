@@ -179,7 +179,7 @@ def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
             "priority": "high",
             "status": "open",
             "created_by": "codex-main",
-            "assigned_to": "codex",
+            "assigned_to": "codex-main",
             "claimed_by": None,
             "tags": ["onboard"],
             "related_files": ["server.py"],
@@ -203,8 +203,10 @@ def test_memory_onboard_registers_agent_and_returns_session_context(tmp_path):
     assert "codex-main" in output
     assert "Active Agents / Collision Check" in output
     assert "Current Status" in output
-    assert "Pending/assigned for you" in output
+    assert "Pending/assigned for you:" in output
     assert "TK-abc" in output
+    # exact-name assignment: it lands in YOUR list, not in the open queue
+    assert "`TK-abc` (open)" in output.split("Pending/assigned for you:")[1]
     assert "Open Tickets" in output
     assert "Pinned Critical Memory" in output
     assert "Production bindings must stay real" in output
@@ -1128,3 +1130,210 @@ def test_gate_does_not_intercept_the_reclaim_heartbeat(tmp_path):
 
     assert "in_progress" in again
     assert {t["id"]: t for t in server._load_ticket_index()}["TK-directed"]["status"] == "in_progress"
+
+
+# --- assignment is a name, never a platform --------------------------------
+
+def _seed_ticket(server, tid, assigned_to=None, status="open", **extra):
+    now = time.time()
+    ticket = {
+        "id": tid, "title": f"ticket {tid}", "description": "d",
+        "target_url": "local", "scope": "READ-ONLY", "required_fields": ["result"],
+        "priority": "medium", "status": status, "created_by": "owner",
+        "assigned_to": assigned_to, "claimed_by": None,
+        "created_at": "2026-08-01T09:00:00", "updated_at": "2026-08-01T09:00:00",
+        "timestamp": now,
+    }
+    ticket.update(extra)
+    server._tickets_dir()
+    kept = [t for t in server._load_ticket_index() if t.get("id") != tid]
+    server._save_ticket_index(kept + [ticket])
+    return ticket
+
+
+def test_onboard_assignment_is_an_exact_name_not_a_platform(tmp_path):
+    """`assigned_to='cursor'` is not the assignment of `cursor-coder`.
+
+    The old test was a substring match on agent_platform, so a ticket addressed
+    to the cursor *platform* was reported as every cursor agent's own
+    assignment. memory_agent_join advertised the same ticket as "waiting for
+    you" while ticket_roles.may_claim (exact) refused the claim — the board
+    invited work it would not let the agent take.
+    """
+    server = load_server(tmp_path)
+    server._save_prj({"description": "assignment", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_ticket(server, "TK-platform", assigned_to="cursor")
+    _seed_ticket(server, "TK-exact", assigned_to="cursor-coder")
+
+    out = asyncio.run(server.memory_onboard(server.OnboardInput(
+        agent_name="cursor-coder", agent_platform="cursor", agent_role="worker",
+        mode="brief", include_tickets=True, include_health=False)))
+
+    mine = out.split("Pending/assigned for you:")[1].split("- Open queue top:")[0]
+    assert "TK-exact" in mine
+    assert "TK-platform" not in mine
+    # the platform-addressed ticket is still visible — in the open queue
+    assert "TK-platform" in out.split("Open queue top:")[1]
+
+
+def test_join_waiting_list_only_offers_claimable_tickets(tmp_path):
+    """The join summary must not advertise work the claim gate will refuse."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "assignment", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_ticket(server, "TK-platform", assigned_to="cursor")
+    _seed_ticket(server, "TK-exact", assigned_to="cursor-coder")
+
+    out = asyncio.run(server.memory_agent_join(server.AgentJoinInput(
+        agent_name="cursor-coder", agent_platform="cursor", agent_role="worker")))
+
+    assert "TK-exact" in out, out
+    assert "TK-platform" not in out.split("ticket(s) waiting for you!")[-1]
+
+
+def test_claim_gate_is_exact_and_case_sensitive(tmp_path):
+    """Prefix and case variants of the assignee are not the assignee."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "claim gate", "tech_stack": "python"})
+    server._save_mem([])
+    _seed_ticket(server, "TK-cursor", assigned_to="cursor-coder")
+    _join(server, "cursor-coder", "worker")
+    _join(server, "cursor-coder-extra", "worker")
+    _join(server, "Cursor-Coder", "worker")
+
+    prefix = asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="cursor-coder-extra", ticket_id="TK-cursor")))
+    case = asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="Cursor-Coder", ticket_id="TK-cursor")))
+    assert "cannot claim" in prefix, prefix
+    assert "cannot claim" in case, case
+    untouched = {t["id"]: t for t in server._load_ticket_index()}["TK-cursor"]
+    assert untouched["status"] == "open" and untouched["claimed_by"] is None
+
+    exact = asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="cursor-coder", ticket_id="TK-cursor")))
+    assert "Claimed" in exact, exact
+    claimed = {t["id"]: t for t in server._load_ticket_index()}["TK-cursor"]
+    assert claimed["claimed_by"] == "cursor-coder"
+
+
+# --- rejected attempts are archived, never overwritten ---------------------
+
+def test_two_rejection_attempts_are_archived_side_by_side(tmp_path):
+    """Rejecting twice used to shutil.move both artifacts onto the same flat
+    names in rejected/, so round 2 destroyed round 1's evidence."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    server._save_agt({
+        "rev": {"agent_name": "codex-main", "agent_platform": "codex",
+                "agent_role": "main", "status": "active", "last_activity": time.time()},
+        "wrk": {"agent_name": "cursor-coder", "agent_platform": "cursor",
+                "agent_role": "worker", "status": "active", "last_activity": time.time()},
+    })
+    _seed_ticket(server, "TK-retry", assigned_to="cursor-coder", created_by="codex-main")
+    preserved = {}
+
+    for attempt, (summary, notes) in enumerate(
+            [("attempt one", "round 1 broken"), ("attempt two", "round 2 broken")], start=1):
+        asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+            agent_name="cursor-coder", ticket_id="TK-retry")))
+        asyncio.run(server.memory_submit_ticket(server.SubmitTicketInput(
+            agent_name="cursor-coder", ticket_id="TK-retry",
+            summary=summary, stay_active=True)))
+        out = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+            agent_name="codex-main", ticket_id="TK-retry", verdict="reject",
+            review_notes=notes, fix_instructions=f"fix {attempt}")))
+        note = out.split("Rejection note: `")[1].split("`")[0]
+        assert note.endswith(f"attempt-{attempt}/TK-retry-rejected.md"), out
+        assert (server.MEMORY_DIR / note).exists(), f"dangling note path: {note}"
+        assert all(path.read_bytes() == content for path, content in preserved.items())
+        attempt_dir = (server.MEMORY_DIR / note).parent
+        preserved.update({path: path.read_bytes() for path in attempt_dir.iterdir()})
+
+    tdir = server._tickets_dir()
+    a1 = tdir / "rejected" / "TK-retry" / "attempt-1"
+    a2 = tdir / "rejected" / "TK-retry" / "attempt-2"
+    assert "**Status**: rejected" in (a1 / "TK-retry.md").read_text()
+    assert "round 1 broken" in (a1 / "TK-retry-rejected.md").read_text()
+    assert "attempt one" in (a1 / "TK-retry-submit.md").read_text()
+    assert "round 2 broken" in (a2 / "TK-retry-rejected.md").read_text()
+    assert "attempt two" in (a2 / "TK-retry-submit.md").read_text()
+    assert "round 2 broken" not in (a1 / "TK-retry-rejected.md").read_text()
+
+    reopened = [t for t in server._load_ticket_index() if t["id"] == "TK-retry"][0]
+    assert reopened["status"] == "open"
+    assert reopened["rejection_count"] == 2
+    assert reopened["claimed_by"] == "cursor-coder"     # attribution kept
+    assert "**Status**: open" in (tdir / "TK-retry.md").read_text()
+
+    asyncio.run(server.memory_claim_ticket(server.ClaimTicketInput(
+        agent_name="cursor-coder", ticket_id="TK-retry")))
+    asyncio.run(server.memory_submit_ticket(server.SubmitTicketInput(
+        agent_name="cursor-coder", ticket_id="TK-retry",
+        summary="attempt three", stay_active=True)))
+    final = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-main", ticket_id="TK-retry", verdict="approve",
+        review_notes="good now")))
+    assert "Approved" in final, final
+    assert all(path.read_bytes() == content for path, content in preserved.items())
+
+    closed = [t for t in server._load_ticket_index() if t["id"] == "TK-retry"][0]
+    assert closed["status"] == "closed"
+    assert "fix_instructions" not in closed
+    assert "**Status**: closed" in (tdir / "closed" / "TK-retry.md").read_text()
+    warnings = [m for m in server._load_mem() if "auto-rejection" in m.get("tags", [])]
+    assert len(warnings) == 2, warnings
+    assert all(not m["pinned"] for m in warnings)
+    assert all(m["title"].startswith("[RESOLVED:closed] ") for m in warnings)
+
+
+def test_reject_without_a_submission_file_fabricates_nothing(tmp_path):
+    """A submission already off disk must not be replaced by a stand-in."""
+    server = load_server(tmp_path)
+    server._save_prj({"description": "p", "tech_stack": "python"})
+    server._save_agt({"rev": {"agent_name": "codex-main", "agent_platform": "codex",
+                              "agent_role": "main", "status": "active",
+                              "last_activity": time.time()}})
+    _seed_ticket(server, "TK-nosub", status="submitted", created_by="codex-main",
+                 claimed_by="cursor-coder")
+    tdir = server._tickets_dir()
+    assert not (tdir / "review" / "TK-nosub-submit.md").exists()
+
+    out = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="codex-main", ticket_id="TK-nosub", verdict="reject",
+        review_notes="nothing to review")))
+    assert "attempt-1" in out, out
+
+    attempt = tdir / "rejected" / "TK-nosub" / "attempt-1"
+    assert (attempt / "TK-nosub.md").exists()
+    assert (attempt / "TK-nosub-rejected.md").exists()
+    assert not (attempt / "TK-nosub-submit.md").exists()
+
+
+def test_rejection_skips_existing_attempt_and_preserves_legacy_files(tmp_path):
+    server = load_server(tmp_path)
+    server._save_prj({"description": "archive collision", "tech_stack": "python"})
+    _join(server, "owner", "main")
+    _seed_ticket(server, "TK-collision", status="submitted",
+                 created_by="owner", claimed_by="worker", rejection_count=0)
+    rejected = server._tickets_dir() / "rejected"
+    legacy = rejected / "TK-collision-rejected.md"
+    legacy.write_bytes(b"legacy review evidence")
+    existing = rejected / "TK-collision" / "attempt-1"
+    existing.mkdir(parents=True)
+    evidence = existing / "TK-collision-rejected.md"
+    evidence.write_bytes(b"existing attempt evidence")
+
+    output = asyncio.run(server.memory_review_ticket(server.ReviewTicketInput(
+        agent_name="owner", ticket_id="TK-collision", verdict="reject",
+        review_notes="new review", fix_instructions="fix the new attempt")))
+
+    assert legacy.read_bytes() == b"legacy review evidence"
+    assert evidence.read_bytes() == b"existing attempt evidence"
+    note = output.split("Rejection note: `")[1].split("`")[0]
+    assert note.endswith("attempt-2/TK-collision-rejected.md")
+    assert "new review" in (server.MEMORY_DIR / note).read_text()
+    ticket = next(t for t in server._load_ticket_index() if t["id"] == "TK-collision")
+    assert ticket["rejection_count"] == 2
+    assert ticket["status"] == "open"

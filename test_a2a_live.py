@@ -165,6 +165,52 @@ async def main():
           "Nothing in" in res, res[:160])
     check("cursor migrated to per-agent file", S._watch_p(legacy_agent).exists())
 
+    # 8. a rejection that leaves the status where it started
+    #    claim -> submit -> reject all land the ticket back on 'open', so a
+    #    worker whose baseline is "open, never submitted" sees no status change
+    #    at all. The rejection_count delta is the only trace: miss it and the
+    #    fix instructions never arrive, and the retry loop quietly dies.
+    print("\n8) baseline-open reject survives the round trip")
+    await make_ticket(SUP, "reject before rearm", assigned_to=WRK)
+    tid = [t["id"] for t in S._load_ticket_index()
+           if t["title"] == "reject before rearm"][0]
+    await wait_as(WRK, timeout_s=1)          # baseline: OPEN, no rejection yet
+    awaited = [t for t in S._load_ticket_index() if t["id"] == tid][0]
+    check("baseline ticket is open", awaited["status"] == "open", awaited["status"])
+
+    await S.memory_claim_ticket(S.ClaimTicketInput(agent_name=WRK, ticket_id=tid))
+    await S.memory_submit_ticket(S.SubmitTicketInput(
+        agent_name=WRK, ticket_id=tid, summary="first go", stay_active=True))
+    await wait_as(SUP, timeout_s=1)          # drain the worker-driven events
+    await S.memory_review_ticket(S.ReviewTicketInput(
+        agent_name=SUP, ticket_id=tid, verdict="reject",
+        review_notes="not the right markup", fix_instructions="use <main> not <div>"))
+
+    back_open = [t for t in S._load_ticket_index() if t["id"] == tid][0]
+    check("ticket reopened to the baseline status", back_open["status"] == "open",
+          back_open["status"])
+
+    res = await wait_as(WRK, timeout_s=5)
+    check("worker wakes despite the unchanged status", "REJECTED" in res, res[:200])
+    check("rejection carries the fix instructions", "use <main> not <div>" in res, res[:300])
+    check("rejection is numbered", "attempt #1" in res, res[:300])
+
+    res_sup = await wait_as(SUP, timeout_s=2)
+    check("reviewer stays asleep on its own rejection", "Nothing in" in res_sup,
+          res_sup[:160])
+
+    # 9. the patience counter resets on a hit, not on a re-arm
+    print("\n9) idle budget resets on a real event")
+    await wait_as(WRK, timeout_s=1)
+    await wait_as(WRK, timeout_s=1)
+    burned = S._load_watch_idles(WRK)
+    check("counter advanced while idle", burned >= 2, str(burned))
+    await make_ticket(SUP, "reset probe", assigned_to=WRK)
+    res = await wait_as(WRK, timeout_s=5)
+    check("woke on the new ticket", "reset probe" in res, res[:160])
+    check("idle counter reset by the hit", S._load_watch_idles(WRK) == 0,
+          str(S._load_watch_idles(WRK)))
+
     print(f"\n{len(ok)}/{len(ok) + len(fail)} passed")
     return 1 if fail else 0
 

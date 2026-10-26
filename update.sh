@@ -138,16 +138,23 @@ if [ -d ".git" ]; then
 fi
 
 # ── Step 2: Sync local environment ──
+source_tools() {
+    .venv/bin/python -c "
+import sys; sys.path.insert(0, '.')
+from server import mcp
+print(len(mcp._tool_manager._tools))
+" 2>/dev/null
+}
+
 SYNCED=0
 if command -v uv >/dev/null 2>&1; then
     echo "📦 Syncing uv environment..."
     if uv sync --inexact -q 2>/dev/null; then
-        TOOLS=$(.venv/bin/python -c "
-import sys; sys.path.insert(0, '.')
-from server import mcp
-print(len(mcp._tool_manager._tools))
-" 2>/dev/null || echo "?")
-        echo "   ✅ uv synced without pruning extras ($TOOLS tools)"
+        if TOOLS=$(source_tools); then
+            echo "   ✅ uv synced without pruning extras ($TOOLS tools)"
+        else
+            echo "   ⚠️ uv synced, but the local server failed to import"
+        fi
         SYNCED=1
     else
         echo "   ⚠️ uv sync failed"
@@ -157,12 +164,11 @@ fi
 
 if [ "$SYNCED" -eq 0 ] && [ -d ".venv" ]; then
     echo "📦 Checking existing .venv..."
-    TOOLS=$(.venv/bin/python -c "
-import sys; sys.path.insert(0, '.')
-from server import mcp
-print(len(mcp._tool_manager._tools))
-" 2>/dev/null || echo "?")
-    echo "   ⚠️ uv unavailable; keeping existing .venv ($TOOLS tools)"
+    if TOOLS=$(source_tools); then
+        echo "   ⚠️ uv unavailable; keeping existing .venv ($TOOLS tools)"
+    else
+        echo "   ⚠️ uv unavailable and the existing .venv cannot import the server"
+    fi
     echo ""
 fi
 
@@ -211,11 +217,11 @@ else
 
     if [ -f "$CONFIG" ]; then
         TMPFILE=$(mktemp)
-        python3 -c "
-import json, os
-with open('''$CONFIG''') as f:
+        python3 - "$CONFIG" "$SCRIPT_DIR" > "$TMPFILE" 2>/dev/null <<'PY'
+import json, os, sys
+with open(sys.argv[1]) as f:
     cfg = json.load(f)
-src = os.path.realpath('$SCRIPT_DIR')
+src = os.path.realpath(sys.argv[2])
 for name, srv in cfg.get('mcpServers', {}).items():
     if name != 'agent-memory':
         continue
@@ -227,14 +233,16 @@ for name, srv in cfg.get('mcpServers', {}).items():
                 marker = os.path.join(dest, 'server.py')
                 ok = False
                 if os.path.isfile(pyproject):
-                    text = open(pyproject, encoding='utf-8').read()
+                    with open(pyproject, encoding='utf-8') as source:
+                        text = source.read()
                     ok = 'name = "onboard-memory-mcp"' in text or 'name = "swisspra-on_board"' in text
                 if not ok and os.path.isfile(marker):
-                    text = open(marker, encoding='utf-8', errors='replace').read(2000)
+                    with open(marker, encoding='utf-8', errors='replace') as source:
+                        text = source.read(2000)
                     ok = 'On Board' in text and 'onboard_memory_mcp' in text
                 if ok:
                     print(dest)
-" > "$TMPFILE" 2>/dev/null
+PY
         while IFS= read -r line; do
             [ -n "$line" ] && TARGETS+=("$line")
         done < "$TMPFILE"
@@ -261,8 +269,33 @@ if [ ${#TARGETS[@]} -eq 0 ]; then
     exit 0
 fi
 
+# ── Mandatory deployment payload ──
+# Every deployed copy needs these to import and render; check them before the
+# first destination file is overwritten so a broken source cannot half-deploy.
+MANDATORY_FILES=(
+    "server.py"
+    "a2a_wait.py"
+    "ticket_roles.py"
+    "thrift_compress.py"
+    "docs/assets/on-board-icon.png"
+)
+
+MISSING_MANDATORY=()
+for rel in "${MANDATORY_FILES[@]}"; do
+    [ -f "$SCRIPT_DIR/$rel" ] || MISSING_MANDATORY+=("$rel")
+done
+
+if [ ${#MISSING_MANDATORY[@]} -gt 0 ]; then
+    echo "❌ Cannot deploy: mandatory file(s) missing from $SCRIPT_DIR"
+    printf '   - %s\n' "${MISSING_MANDATORY[@]}"
+    echo "   No destination was modified. Restore the missing file(s) and rerun."
+    exit 1
+fi
+
 echo "🚀 Deploying to ${#TARGETS[@]} location(s)..."
 echo ""
+
+DEPLOY_FAILED=0
 
 for DEST in "${TARGETS[@]}"; do
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -288,6 +321,9 @@ for DEST in "${TARGETS[@]}"; do
     mkdir -p "$BACKUP_DIR/hooks" "$BACKUP_DIR/configs" "$BACKUP_DIR/templates" "$BACKUP_DIR/docs"
 
     copy_file_if_present "$SCRIPT_DIR/server.py" "$DEST/server.py"
+    copy_file_if_present "$SCRIPT_DIR/a2a_wait.py" "$DEST/a2a_wait.py"
+    copy_file_if_present "$SCRIPT_DIR/ticket_roles.py" "$DEST/ticket_roles.py"
+    copy_file_if_present "$SCRIPT_DIR/thrift_compress.py" "$DEST/thrift_compress.py"
     copy_file_if_present "$SCRIPT_DIR/pyproject.toml" "$DEST/pyproject.toml"
     copy_file_if_present "$SCRIPT_DIR/uv.lock" "$DEST/uv.lock"
     copy_file_if_present "$SCRIPT_DIR/dashboard_live.py" "$DEST/dashboard_live.py"
@@ -334,31 +370,57 @@ for DEST in "${TARGETS[@]}"; do
         copy_file_if_present "$SCRIPT_DIR/docs/SETUP.md" "$DEST/docs/SETUP.md"
         copy_file_if_present "$SCRIPT_DIR/docs/TOOLS.md" "$DEST/docs/TOOLS.md"
         copy_file_if_present "$SCRIPT_DIR/docs/A2A.md" "$DEST/docs/A2A.md"
+        copy_file_if_present "$SCRIPT_DIR/docs/assets/on-board-icon.png" "$DEST/docs/assets/on-board-icon.png"
     fi
 
-    DEPLOY_SYNCED=0
     if command -v uv >/dev/null 2>&1; then
-        if (cd "$DEST" && uv sync --inexact -q) 2>/dev/null; then
-            DEPLOY_SYNCED=1
-        fi
+        (cd "$DEST" && uv sync --inexact -q) 2>/dev/null || true
     fi
 
-    TOOLS="?"
-    if [ "$DEPLOY_SYNCED" -eq 1 ]; then
-        TOOLS=$(cd "$DEST" && .venv/bin/python -c "
-import sys; sys.path.insert(0, '.')
-from server import mcp; print(len(mcp._tool_manager._tools))
-" 2>/dev/null || echo "?")
-    elif [ -f "$DEST/.venv/bin/python" ]; then
-        TOOLS=$("$DEST/.venv/bin/python" -c "
-import sys; sys.path.insert(0, '$DEST')
-from server import mcp; print(len(mcp._tool_manager._tools))
-" 2>/dev/null || echo "?")
+    DEST_PYTHON=""
+    for candidate in "$DEST/.venv/bin/python" "$DEST/.venv/Scripts/python.exe"; do
+        if [ -x "$candidate" ]; then
+            DEST_PYTHON="$candidate"
+            break
+        fi
+    done
+
+    if [ -z "$DEST_PYTHON" ]; then
+        echo "   ⚠️ Source copied to $DEST, but runtime unavailable there — no usable Python in $DEST/.venv"
+        echo "      uv sync did not provide one (uv missing or sync failed); nothing was installed globally."
+        echo "      Finish it there with: cd \"$DEST\" && uv sync --inexact"
+        echo "   ↩ Backup: $BACKUP_DIR"
+        DEPLOY_FAILED=1
+        continue
+    fi
+
+    if ! TOOLS=$(cd "$DEST" && "$DEST_PYTHON" -c '
+import sys
+
+sys.path.insert(0, sys.argv[1])
+
+from server import mcp
+
+print(len(mcp._tool_manager._tools))
+' "$DEST" 2>&1); then
+        echo "   ❌ Source copied to $DEST, but the server there failed to import:"
+        printf '%s\n' "$TOOLS" | sed 's/^/      /'
+        echo "   ↩ Backup: $BACKUP_DIR"
+        DEPLOY_FAILED=1
+        continue
     fi
 
     echo "   ✅ Updated ($TOOLS tools)"
     echo "   ↩ Backup: $BACKUP_DIR"
 done
+
+if [ "$DEPLOY_FAILED" -ne 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "❌ Update finished with deployment errors — see the failed location(s) above."
+    echo "   Files were copied, but at least one copy is not usable yet."
+    exit 1
+fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

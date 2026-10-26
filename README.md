@@ -97,6 +97,10 @@ pipx or uv (the command is `onboard-memory-mcp.exe`). Point your MCP client's
 and run from a clone using the setup paths below. (On Homebrew 6+, approve the
 one-time tap-trust prompt, or run `brew trust swisspra/tap`.)
 
+The Python runtime requires `mcp[cli]>=1.28.1,<2`. MCP SDK 2.x removed the
+`mcp.server.fastmcp` API used here; let the installer resolve the supported 1.x
+SDK rather than independently upgrading it to 2.x.
+
 #### Headless config (no clone)
 
 With the server installed, wire your MCP client to it directly — no repo
@@ -302,13 +306,13 @@ migration guide live in [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
-## Tools (29 MCP tools, 5 buckets)
+## Tools (30 MCP tools, 5 buckets)
 
 | Bucket | Tools |
 |---|---|
 | **Agent lifecycle** | `memory_onboard`, `memory_agent_join`, `memory_handoff`, `memory_checkpoint`, `memory_get_briefing`, `memory_wait_for_event` |
 | **Ticket queue** | `memory_create_ticket`, `memory_claim_ticket`, `memory_submit_ticket`, `memory_review_ticket`, `memory_cancel_ticket`, `memory_terminate_ticket`, `memory_list_tickets` |
-| **Persistent memory** | `memory_write`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links` |
+| **Persistent memory** | `memory_write`, `memory_unpin`, `memory_read`, `memory_search`, `memory_search_vector`, `memory_links` |
 | **Project context** | `memory_init`, `memory_bootstrap`, `memory_status`, `memory_doctor`, `memory_update_state`, `memory_context_dirs`, `memory_context_read` |
 | **Compaction** | `memory_prepare_compaction`, `memory_compact`, `memory_token_usage`, `memory_search_archive` |
 
@@ -344,10 +348,13 @@ your-project/
 │   ├── checkpoints/
 │   └── tickets/
 │       ├── _index.json
-│       ├── TK-<id>.md         the spec
-│       ├── TK-<id>-submit.md  dev submission
-│       ├── TK-<id>-review.md  QA / reviewer verdict
-│       └── closed/
+│       ├── TK-<id>.md                      the spec
+│       ├── review/TK-<id>-submit.md        dev submission
+│       ├── closed/                         approved work
+│       └── rejected/<ticket_id>/attempt-<N>/
+│           ├── <ticket_id>.md              rejected spec for that round
+│           ├── <ticket_id>-submit.md       submission under review
+│           └── <ticket_id>-rejected.md     reviewer notes + fix instructions
 ```
 
 Everything is plain text or JSON. You can `cat` your way through the

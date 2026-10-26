@@ -1,5 +1,62 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Replaced the active dashboard's Quota saved page with **Memory footprint**:
+  proportional live/digest/archive text estimates, largest live entries, pinned
+  content, and recorded compaction comparisons. It reports saved text, not
+  inferred quota, provider usage, or time gained. Missing compression baselines
+  remain unreported, and summaries larger than their source show growth.
+
+### Obsoleted
+
+- The previous **Quota saved** design remains accessible through **View
+  obsoleted design** on Memory footprint, with an explicit **Obsoleted** warning
+  and a return button. Its original time-window controls and Rich/Bars views
+  are retained for reference; its assumed savings are not the current view.
+
+### Fixed
+
+- Distribution archives now explicitly select the runtime modules and icon.
+  Checkout tests, local boards, virtual environments, and scratch files no
+  longer enter the wheel or sdist. The MCP SDK dependency stays on supported
+  `mcp[cli]>=1.28.1,<2`; SDK 2.x removed the FastMCP import this server uses.
+  CI and release builds check archive contents and exercise a wheel-only
+  installation outside the checkout before uploading artifacts.
+- All shared board read-modify-write paths use the existing board lock,
+  including checkpoints, handoffs, compaction, unpinning, state updates,
+  bootstrap, heartbeats, and idle sweeps. Expired-claim transitions reload the
+  index under the lock. Onboarding render and event-wait sleeps remain unlocked.
+  Cross-process locking still depends on POSIX `fcntl`; Windows retains the
+  existing multi-instance concurrency limitation.
+- Assignment displays and claim invitations use exact, case-sensitive stable
+  agent names instead of platform or substring matches. Coordinator authority
+  and the self-review gate are unchanged.
+- Every rejected review gets an immutable
+  `tickets/rejected/<ticket_id>/attempt-<N>/` directory. Existing attempt
+  directories are skipped, legacy flat evidence is retained, and the canonical
+  ticket reopens. Event waits now detect a rejection-counter increase even
+  when a fast claim/submit/reject cycle returns the status to `open`, and await
+  asynchronous heartbeat callbacks before reading the next snapshot.
+- The live dashboard accounts for all eleven ticket states, flags inactive
+  claimers consistently through review, and separates terminated work from
+  cancellations. Overview, Tokens, and Quota use the server's per-field
+  Unicode-code-point estimate; modeled savings are not billing telemetry.
+- `update.sh` preflights and deploys the runtime sidecars and icon, preserves
+  prior destination files in backups, and exits nonzero if the destination
+  cannot import the copied runtime. Setup/update regressions run only against
+  copied temporary sources and registries, without pulling or syncing the
+  developer's checkout.
+- Deployment auto-detection preserves quoted package names and accepts paths
+  containing apostrophes by passing paths as Python arguments instead of
+  interpolating them into source. Discovery and cross-process smoke file reads
+  now close their handles explicitly; lint-only unused imports and redundant
+  f-string prefixes are removed without changing output.
+- Tool documentation lists the actual thirty tools and corrects assignment,
+  submit/review session, compaction, and event-wait contracts.
+
 ## v4.0.2
 
 Patch release. One concurrency fix and one hygiene fix, both found by running

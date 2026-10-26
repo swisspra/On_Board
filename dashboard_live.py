@@ -51,7 +51,7 @@ OUT_PATH = MEMORY_DIR / "dashboard-live.html"
 
 if not MEMORY_DIR.exists():
     print(f"ERROR: .agent-mem/ not found at {MEMORY_DIR}")
-    print(f"       Run memory_init first, or pass a project path that has .agent-mem/")
+    print("       Run memory_init first, or pass a project path that has .agent-mem/")
     sys.exit(1)
 
 # -- HTML shell --------------------------------------------------------------
@@ -163,6 +163,82 @@ section{animation:fade .3s ease}
 .flow-card.orphan{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-soft)}
 .flow-empty{color:var(--dim);font-size:11px;text-align:center;padding:10px}
 .flow-branch{display:flex;gap:12px;margin-top:14px}
+
+/* Memory footprint uses the existing theme; saved text is not usage telemetry. */
+.footprint,.obsoleted-view{animation:none}
+.fp-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin:30px 0 20px}
+.fp-page-head h2{font-size:24px;font-weight:600;letter-spacing:-.025em;line-height:1.2}
+.fp-page-head p{color:var(--muted);margin-top:7px;max-width:60ch}
+.fp-legacy{border:1px solid var(--border);background:transparent;color:var(--text);border-radius:8px;padding:9px 12px;white-space:nowrap;font-size:12px}
+.fp-legacy:hover{background:var(--panel2);border-color:var(--muted)}
+.fp-legacy:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.fp-map{padding:24px 26px}
+.fp-summary{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:25px}
+.fp-label{color:var(--muted);font-size:12px}
+.fp-total{font-size:clamp(38px,5.5vw,64px);font-weight:600;letter-spacing:-.045em;line-height:1.1;font-variant-numeric:tabular-nums;margin:8px 0}
+.fp-unit{color:var(--muted);font-size:12px}
+.fp-scope{max-width:28ch;color:var(--muted);font-size:12px;line-height:1.7}
+.fp-strip{height:18px;display:flex;overflow:hidden;border-radius:4px;background:var(--panel2)}
+.fp-strip span{height:100%}
+.fp-live{background:var(--accent)}
+.fp-digest{background:var(--muted)}
+.fp-archive{background:var(--border)}
+.fp-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;margin-top:22px}
+.fp-source{border-top:2px solid var(--border);padding-top:12px;min-width:0}
+.fp-source:first-child{border-color:var(--accent)}
+.fp-source:nth-child(2){border-color:var(--muted)}
+.fp-source h3{font-size:13px;font-weight:500}
+.fp-source strong{display:block;font-size:24px;letter-spacing:-.025em;font-weight:600;font-variant-numeric:tabular-nums;margin:7px 0}
+.fp-source p{color:var(--muted);font-size:12px}
+.fp-source code{display:block;color:var(--muted);font-size:10.5px;overflow-wrap:anywhere;margin-top:8px}
+.fp-body{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px;margin:20px 0}
+.fp-section-head{padding:19px 22px 15px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.fp-section-head h3,.fp-note h3{font-size:14px;font-weight:600}
+.fp-section-head span{font-size:11px;color:var(--muted)}
+.fp-entries{list-style:none;padding:0 22px 6px}
+.fp-entry{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:18px;padding:14px 0;border-top:1px solid var(--border-soft)}
+.fp-entry-title{font-size:13px;overflow-wrap:anywhere}
+.fp-entry-meta{color:var(--muted);font-size:11px;margin-top:4px}
+.fp-entry-value{font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fp-entry-value small{display:block;color:var(--muted);font-size:10px;text-align:right;margin-top:3px}
+.fp-note{padding:20px 22px}
+.fp-pin{display:flex;align-items:baseline;gap:9px;margin:12px 0 5px}
+.fp-pin strong{font-size:32px;line-height:1.1;font-weight:600;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.fp-pin span,.fp-note p{color:var(--muted);font-size:12px;line-height:1.7}
+.fp-method{border-top:1px solid var(--border);margin-top:20px;padding-top:18px}
+.fp-method h3{margin-bottom:7px}
+.fp-table-wrap{overflow-x:auto;padding:0 22px 10px}
+.fp-table{width:100%;border-collapse:collapse;text-align:left;font-size:12px}
+.fp-table th{color:var(--muted);font-weight:500;font-size:11px;padding:0 12px 12px 0}
+.fp-table td{padding:14px 12px 14px 0;border-top:1px solid var(--border-soft);vertical-align:top}
+.fp-table th:not(:first-child),.fp-table td:not(:first-child){text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.fp-table td:first-child{min-width:140px}
+.fp-table td small{display:block;color:var(--muted);font-size:11px;margin-top:4px}
+.fp-table td:last-child,.fp-table th:last-child{padding-right:0}
+.fp-reduced{color:var(--text)}
+.fp-expanded{color:var(--text);font-weight:600}
+.fp-table-wrap:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.fp-footnote{color:var(--muted);font-size:11px;line-height:1.7;padding:14px 22px 18px;max-width:95ch}
+.obsolete-banner{border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;background:var(--panel);padding:18px 20px;margin:24px 0}
+.obsolete-banner strong{display:block;color:var(--text);font-size:15px;margin-bottom:5px}
+.obsolete-banner p{color:var(--muted);max-width:75ch;margin-bottom:13px;line-height:1.6}
+.obsolete-quota-grid{display:grid;grid-template-columns:var(--legacy-cols);gap:16px;margin-bottom:16px}
+@media (max-width: 860px){
+  .fp-page-head{flex-direction:column;margin-top:24px;gap:14px}
+  .fp-summary{align-items:flex-start;flex-direction:column;gap:14px}
+  .fp-scope{max-width:60ch}
+  .fp-map{padding:20px}
+  .fp-sources{grid-template-columns:1fr;gap:18px}
+  .fp-source{display:grid;grid-template-columns:1fr auto;gap:3px 15px}
+  .fp-source strong{grid-column:2;grid-row:1 / 3;margin:0;font-size:23px}
+  .fp-source code{grid-column:1 / -1;margin-top:4px}
+  .fp-body,.obsolete-quota-grid{grid-template-columns:1fr}
+  .fp-section-head{flex-wrap:wrap;padding:18px}
+  .fp-entries{padding:0 18px 6px}
+  .fp-note{padding:18px}
+  .fp-table-wrap{padding:0 18px 8px}
+  .fp-footnote{padding:12px 18px 18px}
+}
 
 #palette{position:fixed;inset:0;z-index:60;display:none;align-items:flex-start;justify-content:center;padding-top:11vh;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)}
 #palette.open{display:flex;animation:fade .15s ease}
@@ -288,9 +364,15 @@ let liveErr = 0;
 /* ---------- colour maps ---------- */
 const TYPE = { decision:'#e0a92e', progress:'#3fb950', blocker:'#e5484d', context:'#4c8dff', handoff:'#a06cf0', todo:'#f0883e', file_change:'#33b3c4', discovery:'#d1b429', warning:'#e0a92e', checkpoint:'#8b6cf0', note:'#7f8794' };
 const PRI = { critical:'#e5484d', high:'#f0883e', medium:'#e0a92e', low:'#3fb950' };
-const ST = { open:'#f0883e', in_progress:'#4c8dff', in_review:'#a06cf0', closed:'#3fb950', rejected:'#e5484d', canceled:'#6a6d75', cancelled:'#6a6d75' };
+/* One entry per canonical ticket state (ticket_roles.STATES) plus the legacy
+   'cancelled' spelling. 'terminated' is its own colour: it is a distinct
+   outcome from 'canceled', not an alias for it. */
+const ST = { open:'#f0883e', claimed:'#3b82f6', in_progress:'#4c8dff', creating_report:'#33b3c4', submitted:'#10b981', reviewing:'#8b6cf0', in_review:'#a06cf0', closed:'#3fb950', rejected:'#e5484d', canceled:'#6a6d75', cancelled:'#6a6d75', terminated:'#b04a4a' };
 const AST = { active:'#3fb950', kia:'#e5484d', completed:'#4c8dff', handed_off:'#a06cf0', idle:'#e0a92e' };
 const typeColor = t => TYPE[t] || '#7f8794';
+/* hasOwnProperty guard: a stray status such as 'constructor' must fall back to
+   the neutral colour rather than collide with Object.prototype. */
+const statusColorOf = s => (typeof s === 'string' && Object.prototype.hasOwnProperty.call(ST, s)) ? ST[s] : '#888';
 const soft = h => (h && h[0] === '#') ? h + '22' : 'var(--accent-soft)';
 const halo = h => (h && h[0] === '#') ? h + '26' : 'transparent';
 
@@ -368,16 +450,39 @@ async function refresh() {
   setLive('ok');
 }
 
+/* ---------- status model (mirrors ticket_roles.STATES) ---------- */
+/* A ticket is "active" while it is live work or awaiting adjudication. Closed,
+   canceled/cancelled and terminated are all finished and stay out of it. */
+const ACTIVE_STATUSES = ['open', 'claimed', 'in_progress', 'creating_report', 'submitted', 'reviewing', 'in_review', 'rejected'];
+/* Ownership matters from the first claim through the last adjudication: a
+   claimer with no active agent record anywhere in this range is a stale claim,
+   whether the ticket is being worked (in_progress) or sits in review. */
+const ACTIVE_CLAIM_STATUSES = ['claimed', 'in_progress', 'creating_report', 'submitted', 'reviewing', 'in_review'];
+const STAGE_OF = { open:'open', claimed:'in_progress', in_progress:'in_progress', creating_report:'in_progress', submitted:'in_review', reviewing:'in_review', in_review:'in_review', closed:'closed' };
+const BRANCH_OF = { canceled:'canceled', cancelled:'canceled', rejected:'rejected', terminated:'terminated' };
+
+/* ---------- token estimation (mirrors server._count_mem_tokens) ---------- */
+/* ~4 characters per token, counted in Unicode code points (for..of walks code
+   points, so an astral emoji counts once, and nothing is allocated per run).
+   Summed per entry, exactly as the server does: rounding the aggregate instead
+   would drift from the numbers the server reports. */
+const estimateTokens = text => { const s = text == null ? '' : String(text); let n = 0; for (const _cp of s) n++; return Math.floor(n / 4); };
+const memoryTokens = entries => (entries || []).reduce((a, e) => a + estimateTokens(e && e.title) + estimateTokens(e && e.content), 0);
+const digestTokens = digests => (digests || []).reduce((a, x) => a + estimateTokens(x && x.summary), 0);
+
 /* ---------- derive view model ---------- */
 function derive() {
   const d = state.data, isRich = state.chartMode === 'rich', C = 2 * Math.PI * 54;
   const memSorted = d.memories.slice().sort((a, b) => b.timestamp - a.timestamp);
-  const openStatuses = ['open', 'in_progress', 'in_review'];
-  const openTickets = d.tickets.filter(t => openStatuses.includes(t.status)).length;
+  const activeTickets = d.tickets.filter(t => ACTIVE_STATUSES.includes(t.status)).length;
   const agentList = Object.values(d.agents);
   const activeAgents = agentList.filter(a => a.status === 'active').length;
   const activeNames = new Set(agentList.filter(a => a.status === 'active').map(a => a.agent_name));
-  const totalTok = d.memories.reduce((a, m) => a + Math.floor((m.title||'').length/4) + Math.floor((m.content||'').length/4), 0);
+  /* A claim is stale when the claimer has no active agent record. This single
+     predicate drives the orphan row, Links/Data Health and the health score so
+     the three can never disagree about which tickets are affected. */
+  const isStaleClaim = t => !!(t.claimed_by && ACTIVE_CLAIM_STATUSES.includes(t.status) && !activeNames.has(t.claimed_by));
+  const totalTok = memoryTokens(d.memories);
 
   const typeCounts = {};
   d.memories.forEach(m => typeCounts[m.memory_type] = (typeCounts[m.memory_type]||0)+1);
@@ -420,10 +525,10 @@ function derive() {
   // tickets
   const priOrder = { critical:0, high:1, medium:2, low:3 };
   const tickets = d.tickets.slice().sort((a,b)=>(priOrder[a.priority]??9)-(priOrder[b.priority]??9) || b.timestamp-a.timestamp).map(t=>{
-    const orphan = t.claimed_by && ['in_progress','in_review'].includes(t.status) && !activeNames.has(t.claimed_by);
-    return { id:t.id, priority:t.priority, priColor:PRI[t.priority]||'#888', status:(t.status||'').replace('_',' '), rawStatus:t.status, statusColor:ST[t.status]||'#888',
+    const orphan = isStaleClaim(t);
+    return { id:t.id, priority:t.priority, priColor:PRI[t.priority]||'#888', status:(t.status||'').replace('_',' '), rawStatus:t.status, statusColor:statusColorOf(t.status),
       edge:orphan?'#e0a92e':'transparent', isOrphan:orphan,
-      orphanReason: orphan ? esc(t.claimed_by)+' claimed this ticket but is no longer active, so nobody is working it.' : '',
+      orphanReason: orphan ? esc(t.claimed_by)+' claimed this ticket but has no active agent record — claimer inactive; ownership/review needs attention.' : '',
       orphanAction: orphan ? 'Release the claim or reassign it to an active agent.' : '',
       title:t.title||'', meta:'by '+(t.created_by||'?')+' → '+(t.assigned_to||'any')+(t.claimed_by?' · claimed by '+t.claimed_by:'')+(t.related_files.length?' · '+t.related_files.join(', '):''),
       q:((t.id||'')+' '+(t.title||'')+' '+(t.status||'')+' '+(t.created_by||'')).toLowerCase() };
@@ -432,11 +537,23 @@ function derive() {
 
   // ticket flow
   const FLOWDEF = [{key:'open',label:'Open'},{key:'in_progress',label:'In progress'},{key:'in_review',label:'In review'},{key:'closed',label:'Closed'}];
-  const fbucket = {open:[],in_progress:[],in_review:[],closed:[],canceled:[],rejected:[]};
-  ticketRows.forEach(t=>{ const k=t.rawStatus==='cancelled'?'canceled':t.rawStatus; if(fbucket[k]) fbucket[k].push(t); else fbucket.open.push(t); });
-  const flowStages = FLOWDEF.map(s=>({key:s.key, label:s.label, color:ST[s.key]||'#888', items:fbucket[s.key], count:fbucket[s.key].length}));
-  const flowBranch = [{key:'canceled',label:'Canceled',color:ST.canceled,items:fbucket.canceled},{key:'rejected',label:'Rejected',color:ST.rejected,items:fbucket.rejected}];
-  const flowBranchTotal = fbucket.canceled.length + fbucket.rejected.length;
+  const fbucket = {open:[],in_progress:[],in_review:[],closed:[],canceled:[],rejected:[],terminated:[],unknown:[]};
+  /* Explicit mapping only. A recognised state never falls through to Open, and
+     terminated is never folded onto canceled; anything genuinely unrecognised
+     lands in 'unknown' rather than being silently mislabelled. */
+  ticketRows.forEach(t=>{
+    const k = t.rawStatus;
+    if (typeof k === 'string' && Object.prototype.hasOwnProperty.call(STAGE_OF, k)) { fbucket[STAGE_OF[k]].push(t); return; }
+    if (typeof k === 'string' && Object.prototype.hasOwnProperty.call(BRANCH_OF, k)) { fbucket[BRANCH_OF[k]].push(t); return; }
+    fbucket.unknown.push(t);
+  });
+  const flowStages = FLOWDEF.map(s=>({key:s.key, label:s.label, color:statusColorOf(s.key), items:fbucket[s.key], count:fbucket[s.key].length}));
+  const flowBranch = [
+    {key:'canceled',label:'Canceled',color:ST.canceled,items:fbucket.canceled},
+    {key:'rejected',label:'Rejected',color:ST.rejected,items:fbucket.rejected},
+    {key:'terminated',label:'Terminated',color:ST.terminated,items:fbucket.terminated}
+  ];
+  const flowBranchTotal = fbucket.canceled.length + fbucket.rejected.length + fbucket.terminated.length;
 
   // links
   const hasShared = (a,b) => { const bs = new Set((b||[]).map(x=>x.toLowerCase())); return (a||[]).some(x=>bs.has(x.toLowerCase())); };
@@ -464,12 +581,12 @@ function derive() {
   const tags = Object.entries(tagMap).sort((a,b)=>b[1]-a[1]).map(([t,c])=>({label:t,count:c}));
 
   const health = [];
-  d.tickets.forEach(t=>{ if (t.claimed_by && ['in_progress','in_review'].includes(t.status) && !activeNames.has(t.claimed_by)) health.push({color:'#e0a92e', msg:'Ticket '+t.id+' is claimed by '+t.claimed_by+', who is offline. Reassign or release it.'}); });
+  d.tickets.forEach(t=>{ if (isStaleClaim(t)) health.push({color:'#e0a92e', msg:'Ticket '+t.id+' — claimer inactive; ownership/review needs attention (claimed by '+t.claimed_by+').'}); });
   if (!health.length) health.push({ color:'#3fb950', msg:'No linkage or data-health warnings.' });
 
   // health score
-  const orphanCount = d.tickets.filter(t => t.claimed_by && ['in_progress','in_review'].includes(t.status) && !activeNames.has(t.claimed_by)).length;
-  const openCrit = d.tickets.filter(t => t.priority==='critical' && ['open','in_progress'].includes(t.status)).length;
+  const orphanCount = d.tickets.filter(isStaleClaim).length;
+  const openCrit = d.tickets.filter(t => t.priority==='critical' && ACTIVE_STATUSES.includes(t.status)).length;
   const blockers = d.memories.filter(m => m.memory_type==='blocker').length;
   const hscore = Math.max(0, Math.min(100, 100 - orphanCount*8 - openCrit*6 - blockers*4));
   const hcolor = hscore>=85?'var(--live)':hscore>=60?'var(--accent)':'#e5484d';
@@ -482,8 +599,8 @@ function derive() {
   const kpis = [
     { label:'Memories', val:d.memories.length+'', sub:'+'+d.archive.length+' archived', trend:{dir:dm>=0?'▲':'▼', text:(dm>=0?'+'+dm:dm)+' writes vs prev day', color:dm>=0?'var(--live)':'#e5484d'} },
     { label:'Agents', val:agentList.length+'', sub:activeAgents+' active' },
-    { label:'Tickets', val:openTickets+'/'+d.tickets.length, sub:'open / total', trend:openCrit>0?{dir:'!', text:openCrit+' critical open', color:'#e5484d'}:null },
-    { label:'Tokens', val:'~'+fmt(totalTok), sub:d.digests.length+' digests' }
+    { label:'Tickets', val:activeTickets+'/'+d.tickets.length, sub:'active / total', trend:openCrit>0?{dir:'!', text:openCrit+' critical active', color:'#e5484d'}:null },
+    { label:'Tokens', val:'~'+fmt(totalTok), sub:d.digests.length+' digests · modeled' }
   ];
 
   // timeline groups
@@ -497,24 +614,23 @@ function derive() {
   const timelineGroups = tg.map(g=>({label:g.label, count:g.items.length+(g.items.length===1?' memory':' memories'), items:g.items}));
 
   // tokens tab
-  const tk = c => Math.floor(c/3);
-  const hot = tk(d.memories.reduce((a,m)=>a+(m.title||'').length+(m.content||'').length,0));
-  const dig = tk(d.digests.reduce((a,x)=>a+(x.summary||'').length,0));
-  const arc = tk(d.archive.reduce((a,m)=>a+(m.title||'').length+(m.content||'').length,0));
+  const hot = memoryTokens(d.memories);
+  const dig = digestTokens(d.digests);
+  const arc = memoryTokens(d.archive);
   const tokenItems = [{label:'Hot memory',value:hot,color:'#e0a92e'},{label:'Digests',value:dig,color:'#4c8dff'},{label:'Archive (disk only)',value:arc,color:'#8b6cf0'}];
   const tokenSegs = donut(tokenItems, C).map(x=>({...x, valStr:fmt(x.value)}));
   const tokenKpis = [
-    { label:'Hot memory', val:'~'+fmt(hot), sub:d.memories.length+' entries' },
-    { label:'Digests', val:'~'+fmt(dig), sub:d.digests.length+' compressed' },
-    { label:'Archive', val:'~'+fmt(arc), sub:d.archive.length+' on disk' },
-    { label:'Per session', val:'~'+fmt(hot+dig+500), sub:'loaded at start' }
+    { label:'Hot memory', val:'~'+fmt(hot), sub:d.memories.length+' entries · modeled' },
+    { label:'Digests', val:'~'+fmt(dig), sub:d.digests.length+' compressed · modeled' },
+    { label:'Archive', val:'~'+fmt(arc), sub:d.archive.length+' on disk · modeled' },
+    { label:'Per session', val:'~'+fmt(hot+dig+500), sub:'loaded at start · modeled' }
   ];
 
   // changes / diff since last checkpoint
   const chk = memSorted.find(m=>m.memory_type==='checkpoint');
   const refTs = chk ? chk.timestamp : nowSec()-86400;
   const chgAdded = memSorted.filter(m=>m.timestamp>refTs && m.memory_type!=='checkpoint').map(fmtMem);
-  const chgTickets = d.tickets.filter(t=>t.timestamp>refTs).sort((a,b)=>b.timestamp-a.timestamp).map(t=>({id:t.id, title:t.title, status:(t.status||'').replace('_',' '), statusColor:ST[t.status]||'#888', ago:ago(t.timestamp)}));
+  const chgTickets = d.tickets.filter(t=>t.timestamp>refTs).sort((a,b)=>b.timestamp-a.timestamp).map(t=>({id:t.id, title:t.title, status:(t.status||'').replace('_',' '), statusColor:statusColorOf(t.status), ago:ago(t.timestamp)}));
   const chgAgents = agentList.filter(a=>a.status!=='active' && a.last_activity>refTs).map(a=>({name:a.agent_name, to:a.status.replace('_',' '), color:AST[a.status]||'#888', ago:ago(a.last_activity)}));
   const changes = { ref: chk?chk.title:'the last 24 hours', refAgo: ago(refTs), added:chgAdded, tickets:chgTickets, agents:chgAgents, empty:!chgAdded.length && !chgTickets.length && !chgAgents.length };
   const changeKpis = [
@@ -523,7 +639,7 @@ function derive() {
     { label:'Agent changes', val:chgAgents.length+'', sub:'status shifts' }
   ];
 
-  // quota tab
+  // Obsoleted quota model, retained only for the previous design.
   const q = quota(state.win, activeNames);
 
 
@@ -637,13 +753,14 @@ function derive() {
     subsHidden: a2aNodes.reduce((s, n) => s + n.hidden, 0),
     legend: Object.entries(EK).map(([k, v]) => ({ k, ...v, n: a2aEdges.filter(e => e.kind === k).reduce((s, e) => s + e.n, 0) })).filter(x => x.n) };
 
-  return { isRich, C, memSorted, openTickets, activeAgents, totalTok, typeSegs, spark:{line,area,total:buckets.reduce((a,b)=>a+b,0)},
+  return { isRich, C, memSorted, activeAgents, totalTok, typeSegs, spark:{line,area,total:buckets.reduce((a,b)=>a+b,0)},
     recent, roster, agentsFull, agentRows, platforms, platCount:platItems.length, platTop, totalAgents:agentList.length, tickets, ticketRows, flowStages, flowBranch, flowBranchTotal, linkTickets, fileLinks, tags, health,
     hscore, hcolor, hlabel, kpis, timelineGroups, tokenKpis, tokenSegs, tokenTotal:fmt(hot+dig+arc),
     changes, changeKpis, q, a2aNodes, a2aEdges, a2aStats,
-    counts:{ memories:d.memories.length, agents:agentList.length, openTickets, a2aEdges:a2aEdges.length } };
+    counts:{ memories:d.memories.length, agents:agentList.length, activeTickets, unknownTickets:fbucket.unknown.length, a2aEdges:a2aEdges.length } };
 }
 
+// Obsoleted: these assumptions are not provider usage or billing telemetry.
 function quota(hours, activeNames) {
   const d = state.data, now = nowSec();
   const win = ts => ts && (now-ts) <= hours*3600;
@@ -652,13 +769,12 @@ function quota(hours, activeNames) {
   const digIn = d.digests.filter(x=>win(Date.parse(x.compressed_at)/1000));
   const tkIn = d.tickets.filter(t=>win(t.timestamp));
   const agIn = Object.values(d.agents).filter(a=>win(Date.parse(a.joined_at)/1000));
-  const tok = c => Math.floor(c/3);
-  const hotChars = memIn.reduce((s,m)=>s+(m.title||'').length+(m.content||'').length,0);
-  const arcChars = arcIn.reduce((s,m)=>s+(m.title||'').length+(m.content||'').length,0);
-  const digChars = digIn.reduce((s,x)=>s+(x.summary||'').length,0) || 800;
-  const briefRaw = tok(hotChars+arcChars)+500;
+  const hotTok = memoryTokens(memIn);
+  const arcTok = memoryTokens(arcIn);
+  const digTok = digestTokens(digIn);
+  const briefRaw = hotTok + arcTok + 500;
   const noSystem = briefRaw + Math.floor(briefRaw*0.2) + Math.floor(briefRaw*0.15);
-  const withSystem = tok(hotChars) + tok(digChars) + 500;
+  const withSystem = hotTok + digTok + 500;
   const savedPer = Math.max(0, noSystem-withSystem);
   const mult = withSystem>0 ? noSystem/withSystem : 1;
   const sessions = agIn.length || 1;
@@ -689,6 +805,71 @@ function quota(hours, activeNames) {
   };
 }
 
+function memoryFootprintHTML(v) {
+  const d = state.data, largest = [];
+  const matches = state.query ? new Set(v.recent.map(m => m.rawId)) : null;
+  let live = 0, pinned = 0, pinnedTokens = 0;
+  for (const m of d.memories) {
+    const tokens = estimateTokens(m.title) + estimateTokens(m.content);
+    live += tokens;
+    if (m.pinned) { pinned++; pinnedTokens += tokens; }
+    if (matches && !matches.has(m.id)) continue;
+    let at = largest.findIndex(item => item.tokens < tokens);
+    if (at < 0) at = largest.length;
+    if (at < 5) {
+      largest.splice(at, 0, { memory:m, tokens });
+      if (largest.length > 5) largest.pop();
+    }
+  }
+  const dig = digestTokens(d.digests), arc = memoryTokens(d.archive);
+  const total = live + dig + arc;
+  const sources = [
+    { label:'Live memory', tokens:live, count:d.memories.length, unit:d.memories.length===1?'entry':'entries', file:'memories.json', color:'fp-live', note:'Current working records' },
+    { label:'Digest summaries', tokens:dig, count:d.digests.length, unit:d.digests.length===1?'summary':'summaries', file:'digests.json', color:'fp-digest', note:'Compressed history' },
+    { label:'Raw archive', tokens:arc, count:d.archive.length, unit:d.archive.length===1?'entry':'entries', file:'archive.json', color:'fp-archive', note:'Stored separately on disk' }
+  ];
+  const recentDigests = d.digests.slice(-5).reverse();
+  const digestRows = recentDigests.map(digest => {
+    const original = Number.isFinite(digest.original_tokens) && digest.original_tokens >= 0 ? digest.original_tokens : null;
+    const summary = estimateTokens(digest.summary);
+    const delta = original === null ? null : original - summary;
+    const change = delta === null ? 'Not recorded' : delta === 0 ? 'Unchanged' : `~${fmt(Math.abs(delta))} ${delta > 0 ? 'fewer' : 'more'}`;
+    const entries = Number.isInteger(digest.entry_count) && digest.entry_count >= 0 ? `${fmt(digest.entry_count)} source ${digest.entry_count===1?'entry':'entries'}` : 'Source count not recorded';
+    return `<tr><td>${esc(digest.period || digest.id || 'Compaction record')}<small>${esc(digest.agent_name || 'Agent not recorded')} · ${entries}</small></td><td>${original === null ? 'Not recorded' : '~'+fmt(original)}</td><td>~${fmt(summary)}</td><td class="${delta !== null && delta < 0 ? 'fp-expanded' : 'fp-reduced'}">${change}</td></tr>`;
+  }).join('');
+  return `<section class="footprint" aria-labelledby="footprint-title">
+    <div class="fp-page-head">
+      <div><h2 id="footprint-title">Memory footprint</h2><p>What the board keeps live, compresses, and stores away.</p></div>
+      <button class="fp-legacy" data-action="tab" data-arg="quota-obsoleted">View obsoleted design</button>
+    </div>
+    <div class="card fp-map">
+      <div class="fp-summary">
+        <div><div class="fp-label">Stored text</div><div class="fp-total">~${fmt(total)}</div><div class="fp-unit">estimated tokens across the three stores</div></div>
+        <p class="fp-scope">A snapshot of saved content.<br>Not a prompt size, usage meter, or quota forecast.</p>
+      </div>
+      <div class="fp-strip" role="img" aria-label="${esc(sources.map(s=>`${s.label}: approximately ${fmt(s.tokens)} tokens`).join('; '))}">${sources.map(s=>`<span class="${s.color}" style="width:${total ? s.tokens / total * 100 : 0}%"></span>`).join('')}</div>
+      <div class="fp-sources">${sources.map(s=>`<div class="fp-source"><h3>${s.label}</h3><strong>~${fmt(s.tokens)}</strong><p>${fmt(s.count)} ${s.unit} · ${s.note}</p><code class="mono">${s.file}</code></div>`).join('')}</div>
+    </div>
+    <div class="fp-body">
+      <div class="card">
+        <div class="fp-section-head"><h3>Largest live entries</h3><span>${state.query ? 'Filtered results' : 'Up to five, by text size'}</span></div>
+        ${largest.length ? `<ol class="fp-entries">${largest.map(({memory:m,tokens})=>`<li class="fp-entry"><div><div class="fp-entry-title">${esc(m.title || '(untitled)')}</div><div class="fp-entry-meta">${esc(m.memory_type || 'note')} · ${esc(m.agent_name || 'Unknown agent')}${m.pinned ? ' · Pinned' : ''}</div></div><div class="fp-entry-value">~${fmt(tokens)}<small>tokens</small></div></li>`).join('')}</ol>` : emptyBox(state.query ? 'No live entries match this filter' : 'No live memory yet', state.query ? 'Clear the filter above to see the largest live entries.' : 'New memory writes will appear here with their text footprint.')}
+      </div>
+      <div class="card fp-note">
+        <h3>Pinned in live memory</h3>
+        <div class="fp-pin"><strong>${fmt(pinned)}</strong><span>of ${fmt(d.memories.length)} live ${d.memories.length===1?'entry':'entries'}</span></div>
+        <p>~${fmt(pinnedTokens)} tokens of pinned text, already included in the live total.</p>
+        <div class="fp-method"><h3>What these numbers mean</h3><p>About four Unicode characters per token, rounded separately for each title and body. Digest summaries use the same estimate.</p><p style="margin-top:9px">Briefing mode decides what an agent receives. System instructions, tool schemas, provider tokenization, and billing are not measured here.</p></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="fp-section-head"><h3>Recorded compaction</h3><span>${recentDigests.length ? `Latest ${recentDigests.length} of ${fmt(d.digests.length)}` : 'No records yet'}</span></div>
+      ${recentDigests.length ? `<div class="fp-table-wrap" tabindex="0" aria-label="Compaction records; scroll horizontally on small screens"><table class="fp-table"><caption class="fp-label" style="text-align:left;padding-bottom:16px">Recorded source estimate compared with the summary text stored now.</caption><thead><tr><th scope="col">Saved summary</th><th scope="col">Source tokens</th><th scope="col">Summary tokens</th><th scope="col">Token change</th></tr></thead><tbody>${digestRows}</tbody></table></div>` : emptyBox('No compaction records yet', 'Digests appear after memory_compact writes a summary. No savings baseline is assumed.')}
+      <p class="fp-footnote">Archive and digest text can describe the same work. These are storage totals, not unique history or tokens saved per session. Missing source estimates stay unreported. Snapshot totals stay unchanged when you filter the entry list.</p>
+    </div>
+  </section>`;
+}
+
 /* ---------- templates ---------- */
 const NAV = [
   ['overview','Overview','memories','<rect x="2" y="2" width="5" height="5" rx="1.2"/><rect x="9" y="2" width="5" height="5" rx="1.2"/><rect x="2" y="9" width="5" height="5" rx="1.2"/><rect x="9" y="9" width="5" height="5" rx="1.2"/>'],
@@ -696,16 +877,16 @@ const NAV = [
   ['changes','Changes',null,'<path d="M2.5 4.5h7"/><path d="M6.5 2l3 2.5-3 2.5"/><path d="M13.5 11.5h-7"/><path d="M9.5 9l-3 2.5 3 2.5"/>'],
   ['agents','Agents','agents','<circle cx="6" cy="6" r="2.4"/><circle cx="11.4" cy="7" r="1.9"/><path d="M2 13.4c0-2.1 1.8-3.3 4-3.3s4 1.2 4 3.3"/>'],
   ['a2a','A2A flow','a2aEdges','<circle cx="3.5" cy="4" r="1.9"/><circle cx="12.5" cy="4" r="1.9"/><circle cx="8" cy="12.5" r="1.9"/><path d="M5.4 4.6c2 1.6 3.2 3.4 3.2 6" stroke-dasharray="1.5 1.4"/><path d="M10.9 5.2c-1.2 1.4-2 3-2.3 5" stroke-dasharray="1.5 1.4"/><path d="M5.4 3.4h5.2"/>'],
-  ['tickets','Tickets','openTickets','<rect x="2" y="4" width="12" height="8" rx="1.6"/><line x1="2" y1="8" x2="14" y2="8" stroke-dasharray="1.4 1.4"/>'],
+  ['tickets','Tickets','activeTickets','<rect x="2" y="4" width="12" height="8" rx="1.6"/><line x1="2" y1="8" x2="14" y2="8" stroke-dasharray="1.4 1.4"/>'],
   ['links','Links',null,'<circle cx="4" cy="4.5" r="2"/><circle cx="12" cy="6" r="2"/><circle cx="7" cy="12" r="2"/><line x1="5.7" y1="5" x2="10.3" y2="5.6"/><line x1="5" y1="6" x2="6.4" y2="10.3"/>'],
   ['tokens','Tokens',null,'<line x1="3.5" y1="13" x2="3.5" y2="8.5" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="13" x2="8" y2="4" stroke-width="2" stroke-linecap="round"/><line x1="12.5" y1="13" x2="12.5" y2="10" stroke-width="2" stroke-linecap="round"/>'],
-  ['quota','Quota saved',null,'<polygon points="9,1.5 3.5,9 7,9 6.5,14.5 12.5,7 8.5,7" fill="currentColor" stroke="none"/>']
+  ['quota','Memory footprint',null,'<polygon points="9,1.5 3.5,9 7,9 6.5,14.5 12.5,7 8.5,7" fill="currentColor" stroke="none"/>']
 ];
 function buildNav(v) {
   document.getElementById('nav').innerHTML = NAV.map(([tab,label,countKey,svg])=>{
-    const on = state.tab===tab;
+    const on = (state.tab==='quota-obsoleted' ? 'quota' : state.tab)===tab;
     let badge = '';
-    if (v && countKey) { const n = v.counts[countKey]; const hot = countKey==='openTickets' && n>0; badge = `<span class="badge mono${hot?' hot':''}">${n}</span>`; }
+    if (v && countKey) { const n = v.counts[countKey]; const hot = countKey==='activeTickets' && n>0; badge = `<span class="badge mono${hot?' hot':''}">${n}</span>`; }
     return `<button class="navbtn${on?' on':''}" data-action="tab" data-arg="${tab}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">${svg}</svg><span class="lbl">${label}</span>${badge}</button>`;
   }).join('');
 }
@@ -872,19 +1053,28 @@ function tabHTML(v) {
     <div class="card" style="padding:18px 20px"><div class="mono" style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:14px">Where the token budget goes</div>
       ${v.isRich ? `<div style="display:flex;align-items:center;gap:28px">${donutSVG(v.tokenSegs, v.tokenTotal, 'TOKENS', 150)}<div style="flex:1;display:flex;flex-direction:column;gap:10px">${v.tokenSegs.map(s=>`<div style="display:flex;align-items:center;gap:10px"><span style="width:10px;height:10px;border-radius:3px;background:${s.color};flex-shrink:0"></span><span style="flex:1;font-size:12.5px">${esc(s.label)}</span><span class="mono" style="font-size:12px;color:var(--text)">${s.valStr}</span><span class="mono" style="font-size:11px;color:var(--dim);width:40px;text-align:right">${s.pct}</span></div>`).join('')}</div></div>`
       : `<div style="display:flex;flex-direction:column;gap:14px">${v.tokenSegs.map(s=>`<div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px"><span style="color:var(--muted)">${esc(s.label)}</span><span class="mono" style="color:var(--text)">${s.valStr} · ${s.pct}</span></div><div style="height:11px;background:var(--track);border-radius:6px;overflow:hidden"><div style="height:100%;border-radius:6px;background:${s.color};width:${s.pct}"></div></div></div>`).join('')}</div>`}
+      <div class="mono" style="font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6">Modeled estimate — about 4 characters per token, counted per memory entry the same way the server does. Not billing telemetry.</div>
     </div>
   </section>`;
 
-  if (t==='quota') { const q=v.q; return `<section>
+  if (t==='quota') return memoryFootprintHTML(v);
+
+  // Obsoleted: retained for reference, not the active footprint or a usage meter.
+  if (t==='quota-obsoleted') { const q=v.q; return `<section class="obsoleted-view">
+    <div class="obsolete-banner" role="note">
+      <strong>Obsoleted: Quota saved</strong>
+      <p>This previous design is kept for reference. Its quota multiplier, time gained, and savings use assumed rework rates and session lengths, not measured provider usage. Use Memory footprint for the current saved-text view.</p>
+      <button class="fp-legacy" data-action="tab" data-arg="quota">Back to Memory footprint</button>
+    </div>
     <div class="seg" style="width:fit-content;border-radius:9px;margin-bottom:18px">${[[24,'1 day'],[168,'7 days'],[99999,'Lifetime']].map(([w,l])=>`<button class="mono ${state.win===w?'on':''}" data-action="win" data-arg="${w}" style="padding:7px 16px">${l}</button>`).join('')}</div>
-    <div style="display:grid;grid-template-columns:${v.isRich?'1.9fr 1fr':'1fr'};gap:16px;margin-bottom:16px">
+    <div class="obsolete-quota-grid" style="--legacy-cols:${v.isRich?'1.9fr 1fr':'1fr'}">
       <div class="card" style="border-left:3px solid var(--accent);padding:22px 24px"><div class="mono" style="font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:8px">Claude time bought back · ${esc(q.winLabel)}</div><div style="font-size:44px;font-weight:700;letter-spacing:-.03em;font-variant-numeric:tabular-nums">${q.mult}<span style="font-size:19px;color:var(--muted);font-weight:500;margin-left:6px">× longer per quota window</span></div><div style="color:var(--muted);font-size:13px;margin-top:10px;max-width:600px;line-height:1.55">Without On Board, ${q.sessions} agent ${q.sessionWord} each spend about <b style="color:var(--text)">${q.noSystem} tokens</b> re-reading history, redoing finished work, and re-explaining context. With On Board that drops to about <b style="color:var(--text)">${q.withSystem}</b>. Claude reaches its quota later, so you wait less for it to reset.</div></div>
       ${v.isRich ? `<div class="card" style="padding:18px;display:flex;align-items:center;justify-content:center"><div style="position:relative;width:150px;height:150px"><svg width="150" height="150" viewBox="0 0 120 120"><circle cx="60" cy="60" r="54" fill="none" stroke="var(--track)" stroke-width="12"/><circle cx="60" cy="60" r="54" fill="none" stroke="var(--accent)" stroke-width="12" stroke-linecap="round" stroke-dasharray="${q.gaugeDash}" transform="rotate(-90 60 60)"/></svg><div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px;font-weight:700">${q.mult}×</div><div class="mono" style="font-size:8.5px;color:var(--dim);letter-spacing:.06em">EFFICIENCY</div></div></div></div>`:''}
     </div>
     <div class="grid3" style="margin-bottom:16px">${q.story.map(s=>`<div class="card" style="padding:16px 18px"><div style="font-size:22px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums">${esc(s.stat)}</div><div style="font-weight:600;font-size:12.5px;margin:5px 0 4px">${esc(s.title)}</div><div style="color:var(--muted);font-size:12px;line-height:1.5">${esc(s.body)}</div></div>`).join('')}</div>
     <div class="card" style="padding:18px 20px;margin-bottom:16px"><div class="mono" style="font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--dim);margin-bottom:14px">Session cost: what Claude loads before doing any work</div>${q.bars.map(b=>`<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:5px"><span style="color:var(--muted)">${esc(b.label)}</span><b style="font-variant-numeric:tabular-nums">${b.valStr} tok</b></div><div style="height:12px;background:var(--track);border-radius:6px;overflow:hidden"><div style="height:100%;border-radius:6px;background:${b.color};width:${b.pct};transition:width .5s ease"></div></div></div>`).join('')}</div>
     <div class="grid4" style="margin-bottom:16px">${q.kpis.map(k=>`<div class="card kpi"><div class="k-lbl mono">${esc(k.label)}</div><div class="k-val" style="font-size:24px">${esc(k.val)}</div><div class="k-sub mono">${esc(k.sub)}</div></div>`).join('')}</div>
-    <div style="border-left:2px solid var(--border);padding:12px 16px;color:var(--dim);font-size:11.5px;line-height:1.6">How this is estimated: briefing size is measured from the memory files. Rework and re-explanation are modeled at 20% and 15%. Time assumes about 45 minutes of active use per session at the quota cap. Minute figures are estimates; the ${q.mult}× ratio comes from actual file sizes.</div>
+    <div style="border-left:2px solid var(--border);padding:12px 16px;color:var(--dim);font-size:11.5px;line-height:1.6">How this is estimated: token counts are modeled from the memory files at about 4 characters per token, summed per entry exactly as the server's <span class="mono">_count_mem_tokens</span> does. Rework and re-explanation are modeled at 20% and 15%. Time assumes about 45 minutes of active use per session at the quota cap. These are modeled estimates, not billing telemetry; the ${q.mult}× ratio comes from actual file sizes.</div>
   </section>`; }
   return '';
 }
@@ -923,7 +1113,7 @@ function setTheme(t){ state.theme=t; LS.set('theme',t); document.documentElement
 function setChart(c){ state.chartMode=c; LS.set('chart',c); syncSegs(); updateMain(); }
 function setDensity(dd){ state.density=dd; LS.set('density',dd); document.documentElement.setAttribute('data-density',dd); syncSegs(); }
 function syncSegs(){ [['seg-theme',state.theme],['seg-chart',state.chartMode],['seg-dens',state.density]].forEach(([id,val])=>{ document.querySelectorAll('#'+id+' button').forEach(b=>b.classList.toggle('on', b.dataset.arg===val)); }); }
-function syncNavActive(){ document.querySelectorAll('#nav .navbtn').forEach(b=>b.classList.toggle('on', b.dataset.arg===state.tab)); }
+function syncNavActive(){ const tab=state.tab==='quota-obsoleted'?'quota':state.tab; document.querySelectorAll('#nav .navbtn').forEach(b=>b.classList.toggle('on', b.dataset.arg===tab)); }
 
 function updateHeader() {
   const d = state.data; if (!d) return;
@@ -1015,7 +1205,7 @@ if "--serve" in flags or "--open" in flags:
     url = f"http://localhost:{PORT}/dashboard-live.html"
     print(f"Serving {MEMORY_DIR} on port {PORT}")
     print(f"    URL: {url}")
-    print(f"    Press Ctrl+C to stop.")
+    print("    Press Ctrl+C to stop.")
     print()
 
     if "--open" in flags:
@@ -1032,9 +1222,9 @@ if "--serve" in flags or "--open" in flags:
     except KeyboardInterrupt:
         print("\nServer stopped.")
 else:
-    print(f"    To view live, run ONE of:")
+    print("    To view live, run ONE of:")
     print(f"      python3 {Path(__file__).name} {PROJECT_ROOT} --open        <- auto-serve + open browser")
     print(f"      python3 {Path(__file__).name} {PROJECT_ROOT} --serve       <- serve only")
-    print(f"    Or manually:")
+    print("    Or manually:")
     print(f"      cd {MEMORY_DIR} && python3 -m http.server {PORT}")
     print(f"      open http://localhost:{PORT}/dashboard-live.html")
