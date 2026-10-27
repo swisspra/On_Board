@@ -18,14 +18,12 @@ Prerequisites, stated separately so nothing is hidden:
 1. Install the skill into the target project:
 
    ```bash
-   npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
+   npx skills add swisspra/On_Board --skill onboard
    ```
 
-   This is the v4.2.0 preview source. After it merges into `main`, use
-   `npx skills add swisspra/On_Board --skill onboard`. `npx` installs the skill
-   through the skills CLI, not a separate On Board npm package or the Python
-   runtime. PyPI currently provides 4.1.1; preserve a working installation and
-   do not claim the preview's native resources until a 4.2+ runtime is verified.
+   `npx` installs the Git-distributed skill through the skills CLI, not a separate
+   On Board npm package or the Python runtime. Preserve a working installation;
+   native resources require a verified 4.2+ runtime, not merely a skill update.
 
 2. Reload the agent so it discovers the `/onboard` skill (reopen the window or
    start a new session).

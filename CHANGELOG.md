@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.0 (unreleased)
+## v4.2.0
 
 ### Added
 
@@ -27,9 +27,9 @@
 - Source setup and updates use the canonical four-file skill group. Wheels and
   sdists include both native modules, not skill files or local project state.
   The helper has a separate Linux/macOS/Windows CI job.
-- The preview documents a branch-pinned `npx skills add` command separately from
-  the default-branch command after merge. Skill delivery from Git and the
-  published Python runtime are independent; pushing this branch is not a release.
+- The default-branch `npx skills add` command is the primary entry. Skill delivery
+  from Git and Python runtime upgrades remain separate; existing working runtime
+  bindings are preserved until an upgrade is explicitly requested.
 
 ### Fixed
 

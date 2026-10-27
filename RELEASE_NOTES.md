@@ -1,15 +1,6 @@
-# v4.2.0 candidate — Skill-first setup and native MCP context
+# v4.2.0 — Skill-first setup and native MCP context
 
-This branch prepares 4.2.0; pushing it does not publish a PyPI package, an MCP
-Registry version, or a GitHub release. PyPI currently provides 4.1.1.
-
-Install the preview `onboard` skill in the target project:
-
-```bash
-npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
-```
-
-Once the changes merge into `main`, the normal install command is:
+Install the `onboard` skill in the target project:
 
 ```bash
 npx skills add swisspra/On_Board --skill onboard
@@ -61,14 +52,14 @@ layout needed to set up another project and reject skill-only update targets.
 The `--version` command reports installed package identity and exits before
 starting stdio service.
 
-After merge, update the skill with `npx skills update -p onboard`; while testing
-the preview, rerun its branch-pinned install command. Runtime upgrades remain
+Update the skill with `npx skills update -p onboard`. Runtime upgrades remain
 separate and manager-matched. Preserve a working 4.1.1/source setup unless its
 replacement is explicitly requested. Native resources require a verified 4.2+
 runtime; a skill-only update does not add them to an older runtime.
 
-For an explicit unreleased-runtime trial, use the
-[optional source preview](docs/SETUP.md#preview-runtime-from-source-optional).
+Source installations can select the
+[4.2.0 release tag](https://github.com/swisspra/On_Board/tree/v4.2.0);
+see the [source runtime guide](https://github.com/swisspra/On_Board/blob/main/docs/SETUP.md#runtime-from-source-optional).
 Do not replace a working shared runtime merely because the skill was updated.
 
 ## Safety and verification boundaries

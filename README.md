@@ -4,7 +4,7 @@
 
 > Shared project memory for agents.
 > One MCP server, one project memory folder, many IDEs and agent clients.
-> **New in v4.0.0:** agents wake each other. The human stops being the message pump.
+> Skill-first setup, one shared runtime, and project-scoped configuration.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![MCP](https://img.shields.io/badge/protocol-MCP-6ee7b7)](https://modelcontextprotocol.io)
@@ -33,26 +33,21 @@ Everything stays local to the project unless you choose to connect other tools.
 
 ## Quick start (skill-first)
 
-This branch is the **v4.2.0 preview**. Install its skill from inside the project
-you want to configure:
+Install the `onboard` skill from inside the project you want to configure:
 
 ```bash
 # Node.js 22.20 or later; select your agent when prompted.
-npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
-```
-
-After the skill-first changes merge into `main`, the normal command is:
-
-```bash
 npx skills add swisspra/On_Board --skill onboard
 ```
 
-`npx` runs the skills CLI from npm; the skill itself comes from Git. There is no
-separate On Board npm package to install, and this command does not install or
-start the Python MCP server by itself. PyPI currently provides **4.1.1**;
-installing the preview skill does not publish or silently upgrade the runtime.
-The new native resources require a verified **4.2+** runtime; see the
-[optional preview runtime](./docs/SETUP.md#preview-runtime-from-source-optional).
+`npx` runs the skills CLI from npm; the skill itself comes from Git. No separate
+On Board npm package is needed. The skill guides runtime installation and native
+client configuration; installing the skill alone does not start an MCP server,
+upgrade an existing shared runtime, or initialize memory.
+
+Native resources require a verified **4.2+** runtime. A working 4.1.1 or source
+installation can stay in place; see [runtime upgrades](./docs/SETUP.md#skill-updates-and-runtime-upgrades)
+or the [optional source runtime](./docs/SETUP.md#runtime-from-source-optional).
 
 Then send your agent this prompt:
 
@@ -466,7 +461,7 @@ files an audit can read.
 
 ---
 
-## Current status (v4.2.0 candidate)
+## Current status (v4.2.0)
 
 The primary skill-first route reuses one shared `onboard-memory-mcp` runtime —
 installed once and reused by every configured project, each with its own

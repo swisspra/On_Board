@@ -11,19 +11,16 @@ It requires Python 3.11+ and writes native project files only; when the machine'
 `uv run --no-project --python 3.12 scripts/setup.py …` (that is running the
 one-time helper, not the daily MCP command).
 
-## Distribution channel
+## Skill and runtime distribution
 
-This is the v4.2.0 preview skill. Install or refresh it in the selected project
-with `npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard`.
-After the changes merge into `main`, the normal source is
+Install or refresh the skill in the selected project with
 `npx skills add swisspra/On_Board --skill onboard`.
 
 The skills CLI runs through npm, but On Board's skill comes from Git and its
-Python runtime remains a separate install. PyPI currently provides 4.1.1; the
-commands below may install that published version. It is sufficient for
-skill-first configuration, not proof of 4.2 native resource capability. Never
-select an unreleased source runtime or replace a working runtime without an
-explicit user request.
+Python runtime remains a separate install. Native resources require a verified
+4.2+ runtime; skill installation alone does not add them to an older runtime.
+Preserve a working 4.1.1/source binding. Never select an unreleased source
+runtime or replace a working runtime without an explicit user request.
 
 ## Ground rules
 
@@ -165,8 +162,7 @@ and ask before replacing an existing shared runtime.
 
 They are separate operations:
 
-- Skill on `main`: `npx skills update -p onboard`; while previewing, rerun the
-  branch-pinned install command above to stay on that source.
+- Skill: `npx skills update -p onboard`.
 - Runtime: a manager-matched `uv tool upgrade onboard-memory-mcp`,
   `pipx upgrade onboard-memory-mcp`, or an explicitly selected Homebrew/source
   update.

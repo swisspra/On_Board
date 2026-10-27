@@ -14,23 +14,16 @@ hidden:
 - **Python 3.10 or later**, plus `uv` or `pipx`, for the `onboard-memory-mcp`
   runtime (reused if already installed).
 
-For the **v4.2.0 preview**, install the skill from inside the target project:
-
-```bash
-npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
-```
-
-After these changes merge into `main`, use the normal short command:
+Install the skill from inside the target project:
 
 ```bash
 npx skills add swisspra/On_Board --skill onboard
 ```
 
 `npx` runs the skills CLI from npm and installs the Git-distributed skill, not
-the Python server. No separate On Board npm package is needed. PyPI currently
-provides 4.1.1, which the skill can reuse or configure. The preview's native
-resources require a verified 4.2+ runtime; installing or updating only the skill
-does not add them to 4.1.1.
+the Python server. No separate On Board npm package is needed. Native resources
+require a verified 4.2+ runtime; installing or updating only the skill does not
+add them to an older runtime or replace a working 4.1.1/source binding.
 
 Reload the agent so it discovers the `/onboard` skill, then run it:
 
@@ -56,17 +49,18 @@ Canonical references: [AGENT_SETUP.md](../AGENT_SETUP.md) and
 
 ### Skill updates and runtime upgrades
 
-After the skill is available on `main`, update the selected project's skill with:
+Update the selected project's skill with:
 
 ```bash
 npx skills update -p onboard
 ```
 
-While testing the preview, rerun the branch-pinned install command above to
-stay on that source. A skill update does not upgrade the shared runtime.
-Runtime upgrades use the original manager (`uv tool upgrade onboard-memory-mcp`,
+A skill update does not upgrade the shared runtime. Runtime upgrades use the
+original manager (`uv tool upgrade onboard-memory-mcp`,
 `pipx upgrade onboard-memory-mcp`, or an explicitly chosen Homebrew/source
-update). Ask before replacing a working shared runtime.
+update). Ask before replacing a working shared runtime, then verify
+`onboard-memory-mcp --version` and trust/restart the client before using new
+runtime capabilities.
 
 ## Manual and source setup
 
@@ -304,15 +298,15 @@ bash /full/path/to/On_Board/doctor.sh /full/path/to/your/project
 This regenerates `.onboard/` config, startup hooks, and rules. It does not
 delete `.agent-mem/` project memory.
 
-## Preview runtime from source (optional)
+## Runtime from source (optional)
 
-Use this only when you explicitly want the unreleased 4.2 runtime and its native
-resources before publication. The preview skill also works with published
-4.1.1; you do not need to replace a working runtime just to use skill-first setup.
+Use this when you explicitly prefer a source checkout over a package-manager
+installation. The release tag below selects the 4.2.0 source; existing working
+4.1.1/source bindings do not need replacing just to use skill-first setup.
 
 ```bash
-git clone --branch feat/skill-first-install --single-branch https://github.com/swisspra/On_Board.git On_Board-preview
-cd On_Board-preview
+git clone --branch v4.2.0 --single-branch https://github.com/swisspra/On_Board.git On_Board
+cd On_Board
 uv sync --locked
 .venv/bin/onboard-memory-mcp --version
 ```

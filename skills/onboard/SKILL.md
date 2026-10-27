@@ -31,20 +31,13 @@ to `references/install.md`.
 ## Primary commands
 
 Install or refresh this skill for a project. Project scope by default; the skills
-CLI manages client links and update tracking. For this v4.2.0 preview:
-
-```bash
-npx skills add 'swisspra/On_Board#feat/skill-first-install' --skill onboard
-```
-
-After these changes merge into `main`, the normal command is:
+CLI manages client links and update tracking:
 
 ```bash
 npx skills add swisspra/On_Board --skill onboard
 ```
 
-On `main`, update the skill itself with the command below. For a preview refresh,
-rerun its branch-pinned install command. Neither operation upgrades the runtime:
+Update the skill itself (this does not upgrade linked projects' runtimes):
 
 ```bash
 npx skills update -p onboard
