@@ -11,7 +11,7 @@
 [![MCP Badge](https://lobehub.com/badge/mcp/swisspra-on_board)](https://lobehub.com/mcp/swisspra-on_board)
 [![Release](https://img.shields.io/github/v/release/swisspra/On_Board?label=release&color=2ea043)](https://github.com/swisspra/On_Board/releases/latest)
 [![A2A](https://img.shields.io/badge/A2A-agents_wake_each_other-8b5cf6)](#agent-to-agent-the-listening-half-v4)
-
+[![On Board MCP server](https://mcprush.com/badge/on-board-mcp/card.svg)](https://mcprush.com/to/on-board-mcp?ref=badge)
 ---
 
 ## What this is
