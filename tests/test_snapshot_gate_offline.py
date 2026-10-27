@@ -1,6 +1,6 @@
 """Offline tests for the _board_snapshot mtime gate (issue #12).
 
-Run: python -m pytest test_snapshot_gate_offline.py
+Run: python -m pytest tests/test_snapshot_gate_offline.py
 
 Builds a throwaway board per test and verifies that memory/ticket edits,
 same-size rewrites, and file removal are visible in the next snapshot.
@@ -15,7 +15,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_server(tmp_path):

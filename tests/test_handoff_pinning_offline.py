@@ -1,6 +1,6 @@
 """Offline tests for handoff hot-slot pressure.
 
-Run: python3 test_handoff_pinning_offline.py
+Run: python -m pytest tests/test_handoff_pinning_offline.py
 
 Both handoff writers used to hardcode priority=3, pinned=True, so every
 handoff ever written held a hot slot permanently. On a 50-slot board that
@@ -17,7 +17,7 @@ from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="handoffpin-"))
 os.environ["AGENT_PROJECT_DIR"] = str(_TMP)
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server as S  # noqa: E402
 

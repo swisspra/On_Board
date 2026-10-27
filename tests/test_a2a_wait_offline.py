@@ -1,6 +1,6 @@
 """Offline tests for a2a_wait — no MCP, no filesystem, no real sleeping.
 
-Run: python3 test_a2a_wait_offline.py
+Run: python -m pytest tests/test_a2a_wait_offline.py
 
 Time is faked, so the whole suite finishes in milliseconds even though it
 exercises 180-second waits.

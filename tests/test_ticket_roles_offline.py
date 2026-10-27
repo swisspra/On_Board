@@ -1,4 +1,4 @@
-"""Offline tests for ticket_roles. Run: python3 test_ticket_roles_offline.py"""
+"""Offline tests for ticket_roles. Run: python -m pytest tests/test_ticket_roles_offline.py"""
 
 import sys
 import ticket_roles as R

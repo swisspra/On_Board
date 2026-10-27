@@ -1,6 +1,6 @@
 """Offline tests for the server half of the idle budget (issue #10).
 
-Run: python -m pytest test_idle_budget_offline.py
+Run: python -m pytest tests/test_idle_budget_offline.py
 
 Covers the minutes -> parks conversion and the watch-cursor round trip,
 including cursor files written before idle_count existed. Each test loads its
@@ -15,7 +15,7 @@ import os
 import uuid
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SNAP = {"tickets": {}, "memories": {}}
 

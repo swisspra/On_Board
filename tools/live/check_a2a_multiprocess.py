@@ -4,7 +4,7 @@ Proves the two audit fixes at the process level, where the unit suites can't:
   HIGH-2  board lock -> zero lost tickets when creates/claims collide
   HIGH-1  per-agent cursors survive concurrent listeners without corruption
 
-Run: python3 test_a2a_multiprocess.py
+Run: python tools/live/check_a2a_multiprocess.py
 """
 
 import json
@@ -15,7 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
-HERE = Path(__file__).parent
+HERE = Path(__file__).resolve().parents[2]
 SCRATCH = Path(tempfile.mkdtemp(prefix="onboard-mp-"))
 N_PROCS = 3
 N_TICKETS = 12          # per process -> 36 total

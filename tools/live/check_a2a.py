@@ -3,7 +3,7 @@
 Real files, real asyncio, real On Board tools — only the timeouts are shrunk
 so the run takes seconds instead of minutes.
 
-Run: python3 test_a2a_live.py
+Run: python tools/live/check_a2a.py
 """
 
 import asyncio
@@ -11,6 +11,10 @@ import os
 import shutil
 import sys
 import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 SCRATCH = tempfile.mkdtemp(prefix="onboard-a2a-live-")
 os.environ["AGENT_PROJECT_DIR"] = SCRATCH

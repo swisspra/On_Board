@@ -1,6 +1,6 @@
 """Offline tests for _split_hot_cold overflow ranking.
 
-Run: python3 test_hot_cold_split_offline.py
+Run: python -m pytest tests/test_hot_cold_split_offline.py
 
 Regression: the overflow sort ranked on priority before recency, so a
 brand-new unpinned priority-0 entry lost its hot slot to week-old
@@ -18,7 +18,7 @@ from pathlib import Path
 
 _TMP = Path(tempfile.mkdtemp(prefix="hotcold-"))
 os.environ["AGENT_PROJECT_DIR"] = str(_TMP)
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import server as S  # noqa: E402
 

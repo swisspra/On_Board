@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Development
+
+- Group all offline test suites under `tests/` and collect them with the default
+  `python -m pytest` command in both development and CI. Test logic is unchanged.
+- Move optional scratch-board programs to `tools/live/`; ordinary pytest
+  discovery no longer imports them.
+- Keep generated pytest/Ruff caches under `.work/` and ignore cache, coverage
+  and build output without hiding test source.
+
 ## v4.2.0
 
 ### Added

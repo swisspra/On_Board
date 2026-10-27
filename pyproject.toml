@@ -26,6 +26,14 @@ test = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+cache_dir = ".work/pytest-cache"
+
+[tool.ruff]
+cache-dir = ".work/ruff-cache"
+
 [tool.hatch.build.targets.wheel]
 only-include = [
     "server.py",

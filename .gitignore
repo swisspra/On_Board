@@ -22,6 +22,18 @@ AGENTS.md
 # Development
 dist/
 .work/
+
+# Generated test/build output; test source stays tracked.
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+*.egg-info/
+
+# Public documentation allowlist
 docs/*
 !docs/SETUP.md
 !docs/TOOLS.md
